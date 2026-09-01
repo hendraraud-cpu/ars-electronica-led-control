@@ -1,0 +1,3 @@
+# Tells the Arduino IDE / CLI which board this sketch is for,
+# so it stops asking for an FQBN.
+default_fqbn: arduino:avr:uno

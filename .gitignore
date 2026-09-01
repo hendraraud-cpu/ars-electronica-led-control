@@ -1,0 +1,13 @@
+# Unrelated to the LED/audio control project - not part of this repo
+ARS SOUND/
+arsarduinowork/
+HALF LIFE*.mp3
+
+# Downloaded tool, not project code (37MB) - grab it fresh from
+# https://github.com/arduino/arduino-cli/releases instead
+ARDUINO/tools/
+
+# Auto-generated
+__pycache__/
+READY/_loop_cache/
+*.pyc

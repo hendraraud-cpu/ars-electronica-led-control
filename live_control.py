@@ -43,7 +43,7 @@ import serial
 import pygame
 import imageio_ffmpeg
 
-ARDUINO_PORT = "COM7"
+ARDUINO_PORT = "COM8"
 BAUD_RATE = 115200
 AUDIO_DIR = r"F:\03_ARS\READY"
 CROSSFADE_SECONDS = 5.0  # default, used unless a state overrides it below

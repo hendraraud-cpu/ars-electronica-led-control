@@ -11,7 +11,7 @@ to its normal power-up sequence).
 import time
 import serial
 
-ARDUINO_PORT = "COM7"
+ARDUINO_PORT = "COM8"
 BAUD_RATE = 115200
 
 print(f"Connecting to Arduino on {ARDUINO_PORT}...")

@@ -44,7 +44,7 @@ import serial
 import pygame
 
 # ---- EDIT THESE TO MATCH YOUR SETUP -------------------------------
-ARDUINO_PORT = "COM7"
+ARDUINO_PORT = "COM8"
 BAUD_RATE = 115200
 AUDIO_DIR = r"F:\03_ARS\READY"
 CROSSFADE_SECONDS = 5.0

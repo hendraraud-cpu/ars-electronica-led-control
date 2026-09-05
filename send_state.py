@@ -27,7 +27,7 @@ import time
 import serial
 import pygame
 
-ARDUINO_PORT = "COM7"
+ARDUINO_PORT = "COM8"
 BAUD_RATE = 115200
 AUDIO_DIR = r"F:\03_ARS\READY"
 

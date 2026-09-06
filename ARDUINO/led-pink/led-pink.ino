@@ -12,36 +12,42 @@
   see checkSerialCommand() and goToState() below, that's the one
   place to change when the real trigger exists.
 
-  STATE 1 SEQUENCE (timestamps relative to the "state 1" trigger):
+  STATE 1 has 4 sections, named a/b/c/d, matching fixed timestamps in the
+  43-second audio track (STATE1_SECTION_START_MS, all measured from the
+  "state1" trigger = the track starting):
+    a = 0ms (0:00)      b = 12000ms (0:12)
+    c = 21000ms (0:21)  d = 30000ms (0:30)
+  Each section plays the SAME comet+glow+expand sequence below, from its
+  own start. Sections a, b, and c get cut off 1.5s before the NEXT
+  section starts (STATE1_SECTION_FADE_MS) - regardless of which part of
+  the sequence they've reached at that moment - fading whatever's
+  currently lit to black over that 1.5s, then the next section starts
+  fresh exactly on its timestamp. Section d has no section after it, so
+  it just plays out its own natural sequence (including its own fadeout
+  below) and then holds dark - matching the end of the 43s track.
+
+  ONE SECTION'S SEQUENCE (timestamps relative to ITS OWN start):
     0ms                    - nothing shown yet (STATE1_START_DELAY_MS
                              = 1133ms)
-    1133ms                 - comet 1 fades in, longer trail than usual
-                             (STATE1_CHUNK_SIZE), travels toward pixel 66
-                             at a CONSTANT speed (STATE1_COMET_SPEED_PXPMS
-                             - no easing, no acceleration, steady/
-                             hypnotic), fading out over the last
-                             STATE1_COMET12_FADE_OUT_PX pixels (6, wider
-                             than comet 3's 4, for a more gradual look)
-                             before it gets there. Keeps going even
-                             after comets 2 and 3 enter - they can all
-                             be on screen together.
-    3433ms                  - comet 2 enters (STATE1_COMET2_TRIGGER_MS),
-                             same speed/trail/fade-out, no fade-in
-    5733ms                  - comet 3 enters (STATE1_COMET3_TRIGGER_MS,
-                             same +2300ms interval as comet 1->2), same
-                             speed/trail/fade-out, no fade-in
-    comet 3 reaches pixel 66 - THIS is what triggers the next stage now
-                             (no fixed deadline) - comets 1 and 2 always
-                             finish naturally well before comet 3 gets
-                             there, so nothing needs cutting off
+    1133ms                 - the (single) comet fades in, longer trail
+                             than usual (STATE1_CHUNK_SIZE), travels
+                             toward pixel 66 at a CONSTANT speed
+                             (STATE1_COMET_SPEED_PXPMS - no easing, no
+                             acceleration, steady/hypnotic), fading over
+                             the last STATE1_COMET_FADE_OUT_PX pixels.
+    comet's TAIL (not just  - THIS is what triggers the next stage now
+    its head) reaches pixel   (no fixed deadline) - it keeps
+    66                        moving/drawing until the whole tail (not
+                             just the head) has passed 66, so the whole
+                             comet has visibly arrived first.
     -> pixel 66 glows solid for STATE1_GLOW_MS (300ms), then the segment
        expands from that same pixel outward, both ways, fast-then-slow,
-       over STATE1_EXPAND_MS (2700ms)
-    fully expanded          - fades the whole segment to black over
-                             STATE1_FADEOUT_MS (2300ms), then the ENTIRE
-                             sequence loops again from the start delay -
-                             repeats forever until a different state
-                             command interrupts it
+       over STATE1_EXPAND_MS (1900ms)
+    fully expanded (section d only) - fades the whole segment to black
+                             over STATE1_FADEOUT_MS (2300ms), then holds
+                             dark and WAITS for the next "state1" trigger
+                             (live_control.py re-sends it when the whole
+                             43s track finishes and loops)
 
   PIXEL MAPPING (12.5mm per pixel)
   -----------------------------------
@@ -73,40 +79,51 @@
 #define STATE_EXPAND_MS     3200   // State 3's expand duration (unchanged)
 
 // State 1 timing - converted from HH:MM:SS:FF timecode at 30fps.
-#define STATE1_START_DELAY_MS     1133  // 00:00:01:04 - nothing shown before comet 1
-// Both comets move at the SAME constant speed - no easing, no
-// acceleration, steady/hypnotic. Speed is derived from covering the
-// full 88-pixel distance in this many ms (the original "2x slower"
-// duration) - comet 2 uses the identical speed, not its own duration.
-#define STATE1_COMET_TRAVEL_MS    4600
+#define STATE1_START_DELAY_MS     133   // 00:00:01:04 shifted 1s earlier - nothing shown before the comet
+// No easing, no acceleration, steady/hypnotic. Speed is derived from
+// covering the full 66-pixel distance in this many ms.
+#define STATE1_COMET_TRAVEL_MS    4038  // sped up ~2px/s (was 4600ms => ~14.3px/s, now ~16.3px/s)
 #define STATE1_COMET_SPEED_PXPMS  ((float)STATE1_MID / STATE1_COMET_TRAVEL_MS)
-// Comet 2 enters at its own fixed timestamp - comet 1 is NOT cut off by
-// it, it just keeps going, finishing its own trail while comet 2
-// travels alongside it.
-#define STATE1_COMET2_TRIGGER_MS  3433  // 00:00:03:13
-// Comet 3 enters after comet 2, same +2300ms interval as comet 1->2.
-// No fixed deadline anymore - comet 3's OWN arrival at pixel 66 is
-// what triggers the glow + expand. Comets 1 and 2 always finish
-// naturally well before comet 3 gets there (they don't need cutting off).
-#define STATE1_COMET3_TRIGGER_MS  5733
-// Right when the last comet ends, pixel 66 alone glows solid for a
+// Section c only: faster comet, timed backward from a specific target -
+// its full arrival (head+trail, 95px) needs to happen early enough that
+// (arrival + STATE1_GLOW_MS) lands expand's start exactly at 00:00:26:00
+// (26000ms absolute, 5000ms into section c, which starts at 21000ms).
+#define STATE1_SECTION_C_COMET_TRAVEL_MS 3173
+// Right when the comet ends, pixel 66 alone glows solid for a
 // moment - then the expand continues from that exact same single
 // pixel, so there's no gap/cut between "comet arrives" and "expand
 // begins" (not an exact given duration - picked a quick, natural hold).
 #define STATE1_GLOW_MS             300
-#define STATE1_EXPAND_MS          2700  // 8700 - 6000 = the "both ways" reveal (unchanged)
+#define STATE1_EXPAND_MS          1900  // the "both ways" reveal - sped up for more velocity
 #define STATE1_EXPAND_SHORTEN_PX     6  // max reach is 6px short of the full segment, each side
 #define STATE1_EXPAND_EDGE_FADE_PX   6  // soft fade at the growing edges (not specified
                                          // exactly - matched the 6px used elsewhere)
 #define STATE1_FADEOUT_MS         2300  // fade to black at the very end (unchanged)
-#define STATE1_COMET_FADE_IN_MS    400  // comet 1 only, at the very start (time-based)
-// Position-based fade-out width (not time-based) - comets 1 and 2 use a
-// wider zone so their disappearance near pixel 66 looks more gradual;
-// comet 3 keeps the tighter original width since its arrival there is
-// the actual trigger for the glow + expand.
-#define STATE1_COMET12_FADE_OUT_PX   6
-#define STATE1_COMET3_FADE_OUT_PX    4
-#define STATE1_CHUNK_SIZE           40  // "longer trail" - vs the usual CHUNK_SIZE (24)
+#define STATE1_COMET_FADE_IN_MS    400  // at the very start (time-based)
+// Keeps moving/drawing until its WHOLE trail (tail included, not just
+// the head) has passed pixel 66 - that's what actually fixes the
+// "sucked into a hole" disappearance (each pixel gets to fade naturally
+// as it individually nears 66, instead of the whole comet vanishing in
+// one frame the instant the head crosses the line).
+#define STATE1_COMET_FADE_OUT_PX    4
+#define STATE1_CHUNK_SIZE           30  // "longer trail" - vs the usual CHUNK_SIZE (24)
+
+// Section timeline (a/b/c/d), all measured from the "state1" trigger.
+// One full comet+glow+expand cycle takes ~9.7s on its own - shorter than
+// every section's window here, so sections a/b/c always get force-faded
+// early rather than ever completing naturally.
+#define STATE1_SECTION_COUNT 4
+const unsigned long STATE1_SECTION_START_MS[STATE1_SECTION_COUNT] = {
+  0,      // a - 0:00
+  11667,  // b - 00:00:11:20 at 30fps
+  21000,  // c - 0:21
+  22533,  // d - 00:00:21:01 + 1500ms (last - no forced cutoff, plays out + fades naturally)
+};
+#define STATE1_SECTION_FADE_MS       1500  // how long the forced cut-to-black takes
+#define STATE1_SECTION_FADE_STEP_MS  20    // how often the fade decay is applied
+#define STATE1_SECTION_FADE_STEP_AMOUNT 18 // per-step decay amount (fadeToBlackBy) -
+                                            // tuned so ~75 steps (1500ms / 20ms) reads
+                                            // as fully faded to black
 
 CRGB leds[NUM_LEDS];
 
@@ -115,9 +132,9 @@ CRGB PINK = CRGB(0xFF, 0x14, 0x5A); // #FF145A - State 1 color (and the comet)
 enum Stage {
   STAGE_STATE0,
   STAGE_STATE1_DELAY, STAGE_STATE1_COMETS, STAGE_STATE1_GLOW,
-  STAGE_STATE1_EXPAND, STAGE_STATE1_FADEOUT,
+  STAGE_STATE1_EXPAND, STAGE_STATE1_FADEOUT, STAGE_STATE1_SECTION_FADE,
   STAGE_STATE2_FLICKER, STAGE_STATE2_BREATHE_INTRO, STAGE_STATE2_SOFT_FLICKER, STAGE_STATE2_HOLD,
-  STAGE_STATE3_CHUNK_MOVE, STAGE_STATE3_CHUNK_EAT, STAGE_STATE3_EXPAND, STAGE_STATE3_HOLD
+  STAGE_STATE3_SHRINK, STAGE_STATE3_COMET, STAGE_STATE3_GLOW, STAGE_STATE3_EXPAND, STAGE_STATE3_HOLD
 };
 // Boots into State 0 (all LEDs off) by default - so any unplanned
 // reset (power blip, USB replug, a control script closing its
@@ -125,12 +142,11 @@ enum Stage {
 Stage currentStage = STAGE_STATE0;
 
 unsigned long state1StageStartTime = 0; // when the current State 1 sub-stage began
-unsigned long state1TriggerTime = 0;    // when "state 1" was triggered (or last looped) -
-                                         // fixed reference for the absolute deadlines
-bool state1Comet2Started = false;
-unsigned long state1Comet2StartTime = 0;
-bool state1Comet3Started = false;
-unsigned long state1Comet3StartTime = 0;
+unsigned long state1TriggerTime = 0;    // when "state 1" was triggered - fixed
+                                         // reference for the section timestamps,
+                                         // never reset by a section restart
+int state1SectionIndex = 0;             // 0=a, 1=b, 2=c, 3=d
+unsigned long state1SectionFadeLastStepTime = 0;
 
 // FastLED.show() briefly disables interrupts on AVR while it bit-bangs
 // the WS2812B timing - called back-to-back with no gap (as every
@@ -166,6 +182,18 @@ void setup() {
 void loop() {
   checkSerialCommand();
 
+  // While inside any normal State 1 sub-stage, check first whether it's
+  // time to force-cut to the next section (a/b/c/d) - this can interrupt
+  // ANY of them, mid-comet, mid-glow, or mid-expand, since one full cycle
+  // (~9.7s) doesn't fit inside every section's window on its own.
+  bool inState1Substage =
+    currentStage == STAGE_STATE1_DELAY || currentStage == STAGE_STATE1_COMETS ||
+    currentStage == STAGE_STATE1_GLOW || currentStage == STAGE_STATE1_EXPAND ||
+    currentStage == STAGE_STATE1_FADEOUT;
+  if (inState1Substage && checkState1SectionCutoff()) {
+    return; // stage just changed to STAGE_STATE1_SECTION_FADE this frame
+  }
+
   switch (currentStage) {
     case STAGE_STATE0:         break; // all LEDs off, nothing to do each frame
     case STAGE_STATE1_DELAY:       doState1Delay(); break;
@@ -173,12 +201,14 @@ void loop() {
     case STAGE_STATE1_GLOW:        doState1Glow(); break;
     case STAGE_STATE1_EXPAND:      doState1Expand(); break;
     case STAGE_STATE1_FADEOUT:     doState1FadeOut(); break;
+    case STAGE_STATE1_SECTION_FADE: doState1SectionFade(); break;
     case STAGE_STATE2_FLICKER:      doState2Flicker(); break;
     case STAGE_STATE2_BREATHE_INTRO: doState2BreatheIntro(); break;
     case STAGE_STATE2_SOFT_FLICKER:  doState2SoftFlicker(); break;
     case STAGE_STATE2_HOLD:         doState2Hold(); break;
-    case STAGE_STATE3_CHUNK_MOVE:   doState3ChunkMove(); break;
-    case STAGE_STATE3_CHUNK_EAT:    doState3ChunkEat(); break;
+    case STAGE_STATE3_SHRINK:       doState3Shrink(); break;
+    case STAGE_STATE3_COMET:        doState3Comet(); break;
+    case STAGE_STATE3_GLOW:         doState3Glow(); break;
     case STAGE_STATE3_EXPAND:       doState3Expand(); break;
     case STAGE_STATE3_HOLD:         doState3Hold(); break;
   }
@@ -236,7 +266,11 @@ void checkSerialCommand() {
 void goToState(int stateNum) {
   if (stateNum == 0) {
     FastLED.clear();
-    showThrottled();
+    FastLED.show(); // direct, unthrottled - this is a one-time transition, not a
+                     // continuous loop, so there's no risk of it spamming the
+                     // strip. showThrottled() here could silently skip pushing
+                     // the blank frame if a prior animated state had just shown
+                     // recently, leaving the strip frozen on that last frame.
     currentStage = STAGE_STATE0;
     Serial.println(F("Manual trigger: State 0 (all LEDs off)"));
   } else if (stateNum == 1) {
@@ -254,26 +288,73 @@ float easeOutCubic(float t) {
   return f * f * f + 1.0;
 }
 
-// ---------- Start (or restart) State 1's whole sequence ----------
+// ---------- Start State 1 from section a (the very beginning) ----------
 void startState1() {
+  state1TriggerTime = millis();
+  state1SectionIndex = 0;
+  startState1Section();
+  Serial.println(F("Manual trigger: State 1 - section a starting..."));
+}
+
+// ---------- Start (or restart) whichever section is current - shared by
+// the very first section and every forced cut to the next one. ----------
+void startState1Section() {
   FastLED.clear();
   showThrottled();
   state1StageStartTime = millis();
-  state1TriggerTime = state1StageStartTime;
-  state1Comet2Started = false;
-  state1Comet3Started = false;
   currentStage = STAGE_STATE1_DELAY;
-  Serial.println(F("Manual trigger: State 1 - waiting before first comet..."));
+  Serial.print(F("State 1 section "));
+  Serial.print((char)('a' + state1SectionIndex));
+  Serial.println(F(" starting..."));
+}
+
+// ---------- Checks whether it's time to force-cut to the next section.
+// Returns true (and switches to STAGE_STATE1_SECTION_FADE) if so - the
+// caller must stop doing anything else with the old stage this frame. ----------
+bool checkState1SectionCutoff() {
+  if (state1SectionIndex + 1 >= STATE1_SECTION_COUNT) return false; // section d - nothing after it
+
+  unsigned long absElapsed = millis() - state1TriggerTime;
+  unsigned long nextSectionStart = STATE1_SECTION_START_MS[state1SectionIndex + 1];
+
+  if (absElapsed >= nextSectionStart - STATE1_SECTION_FADE_MS) {
+    currentStage = STAGE_STATE1_SECTION_FADE;
+    state1StageStartTime = millis();
+    state1SectionFadeLastStepTime = millis();
+    Serial.println(F("State 1 section cutting to black early for the next section..."));
+    return true;
+  }
+  return false;
+}
+
+// ---------- Forced cut-to-black between sections: fades out whatever's
+// CURRENTLY lit (no matter which sub-stage it was) over
+// STATE1_SECTION_FADE_MS, timed to land exactly on the next section's
+// start, then starts that section fresh. ----------
+void doState1SectionFade() {
+  unsigned long elapsed = millis() - state1StageStartTime;
+
+  if (elapsed >= STATE1_SECTION_FADE_MS) {
+    FastLED.clear();
+    showThrottled();
+    state1SectionIndex++;
+    startState1Section();
+    return;
+  }
+
+  if (millis() - state1SectionFadeLastStepTime >= STATE1_SECTION_FADE_STEP_MS) {
+    state1SectionFadeLastStepTime = millis();
+    fadeToBlackBy(leds, NUM_LEDS, STATE1_SECTION_FADE_STEP_AMOUNT);
+    showThrottled();
+  }
 }
 
 // ---------- Nothing shown yet - just waiting out STATE1_START_DELAY_MS ----------
 void doState1Delay() {
   if (millis() - state1StageStartTime >= STATE1_START_DELAY_MS) {
-    state1StageStartTime = millis(); // comet 1's t=0
-    state1Comet2Started = false;
-    state1Comet3Started = false;
+    state1StageStartTime = millis(); // the comet's t=0
     currentStage = STAGE_STATE1_COMETS;
-    Serial.println(F("State 1 comet 1 starting (fading in)..."));
+    Serial.println(F("State 1 comet starting (fading in)..."));
   }
 }
 
@@ -289,17 +370,18 @@ uint8_t state1CometFadeIn(unsigned long elapsedSinceStart, bool fadesIn) {
 // Each pixel fades based on its OWN distance to pixel 66 - not the
 // head's - so the tail visibly melts into that fixed point as pixels
 // pass through the last fadeOutPx pixels, rather than the whole comet
-// dimming as one block. fadeOutPx is passed in so different comets can
-// use a different fade width. ----------
-void drawState1Comet(float pos, uint8_t fadeInBrightness, int fadeOutPx) {
+// dimming as one block. fadeOutPx and trailLength are passed in so
+// different comets (or the same comet in a different section) can use a
+// different fade width / trail length. ----------
+void drawState1Comet(float pos, uint8_t fadeInBrightness, int fadeOutPx, int trailLength) {
   int headPos = (int)pos;
-  for (int offset = 0; offset < STATE1_CHUNK_SIZE; offset++) {
+  for (int offset = 0; offset < trailLength; offset++) {
     int px = headPos - offset;
     if (px < 0 || px >= NUM_LEDS) continue;
 
     // Tail taper: brightest at the head (offset 0), fading out toward
     // the back of the trail.
-    uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE1_CHUNK_SIZE - 1));
+    uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (trailLength - 1));
 
     // Melt into pixel 66: this pixel's own distance to the endpoint,
     // regardless of where the head currently is.
@@ -319,58 +401,31 @@ void drawState1Comet(float pos, uint8_t fadeInBrightness, int fadeOutPx) {
   }
 }
 
-// ---------- Three comets, at constant (non-accelerating) speed. Each
-// keeps finishing its own trail independently of the others - they can
-// overlap on screen. Comet 3's own arrival at pixel 66 is what triggers
-// the glow + expand (no fixed deadline anymore) - comets 1 and 2 always
-// finish naturally well before comet 3 gets there. ----------
+// ---------- One comet, at constant (non-accelerating) speed, in every
+// section. Its own arrival at pixel 66 triggers the glow + expand - but
+// not until its LAST pixel (the tail end, not just the head) has reached
+// 66, so the whole comet has visibly arrived before expand begins.
+// Section c uses a faster speed than the rest, timed to hit a specific
+// expand-start target (see STATE1_SECTION_C_COMET_TRAVEL_MS above). ----------
 void doState1Comets() {
-  unsigned long absElapsed = millis() - state1TriggerTime;
+  bool isSectionC = (state1SectionIndex == 2);
+  unsigned long absElapsed = millis() - state1StageStartTime;
 
   FastLED.clear();
 
-  // Comet 1: running since this stage began.
-  unsigned long elapsed1 = millis() - state1StageStartTime;
-  float pos1 = STATE1_COMET_SPEED_PXPMS * elapsed1;
-  if (pos1 < STATE1_MID) {
-    drawState1Comet(pos1, state1CometFadeIn(elapsed1, true), STATE1_COMET12_FADE_OUT_PX);
+  float cometSpeed = isSectionC
+    ? ((float)STATE1_MID / STATE1_SECTION_C_COMET_TRAVEL_MS)
+    : STATE1_COMET_SPEED_PXPMS;
+  float pos = cometSpeed * absElapsed;
+  float tailPos = pos - (STATE1_CHUNK_SIZE - 1);
+  if (tailPos < STATE1_MID) {
+    drawState1Comet(pos, state1CometFadeIn(absElapsed, true), STATE1_COMET_FADE_OUT_PX, STATE1_CHUNK_SIZE);
+    showThrottled();
+  } else {
+    state1StageStartTime = millis();
+    currentStage = STAGE_STATE1_GLOW;
+    Serial.println(F("State 1 comet's tail reached pixel 66 - glowing..."));
   }
-
-  // Comet 2: enters at its own fixed timestamp, independent of comet 1.
-  if (absElapsed >= STATE1_COMET2_TRIGGER_MS) {
-    if (!state1Comet2Started) {
-      state1Comet2Started = true;
-      state1Comet2StartTime = millis();
-      Serial.println(F("State 1 comet 2 entering (comet 1 still finishing)..."));
-    }
-    unsigned long elapsed2 = millis() - state1Comet2StartTime;
-    float pos2 = STATE1_COMET_SPEED_PXPMS * elapsed2;
-    if (pos2 < STATE1_MID) {
-      drawState1Comet(pos2, state1CometFadeIn(elapsed2, false), STATE1_COMET12_FADE_OUT_PX);
-    }
-  }
-
-  // Comet 3: enters at its own fixed timestamp - its OWN arrival at
-  // pixel 66 is what triggers the glow + expand.
-  if (absElapsed >= STATE1_COMET3_TRIGGER_MS) {
-    if (!state1Comet3Started) {
-      state1Comet3Started = true;
-      state1Comet3StartTime = millis();
-      Serial.println(F("State 1 comet 3 entering..."));
-    }
-    unsigned long elapsed3 = millis() - state1Comet3StartTime;
-    float pos3 = STATE1_COMET_SPEED_PXPMS * elapsed3;
-    if (pos3 < STATE1_MID) {
-      drawState1Comet(pos3, state1CometFadeIn(elapsed3, false), STATE1_COMET3_FADE_OUT_PX);
-    } else {
-      state1StageStartTime = millis();
-      currentStage = STAGE_STATE1_GLOW;
-      Serial.println(F("State 1 comet 3 reached pixel 66 - glowing..."));
-      return;
-    }
-  }
-
-  showThrottled();
 }
 
 // ---------- Pixel 66 alone glows solid for a moment right as the last comet
@@ -428,31 +483,41 @@ void doState1Expand() {
 }
 
 // ---------- Fade the fully-expanded segment to black, then go dark (State 0) ----------
+// Uses the SAME shortened range + soft tapered ends as the final frame of
+// doState1Expand() - keeping the gradient at the tips instead of jumping to
+// a flat, full-width, hard-edged block right as the fade begins.
 void doState1FadeOut() {
   unsigned long elapsed = millis() - state1StageStartTime;
   float t = (float)elapsed / STATE1_FADEOUT_MS;
   if (t > 1.0) t = 1.0;
 
-  uint8_t brightness = (uint8_t)(255.0 * (1.0 - t));
-  CRGB c = PINK;
-  c.nscale8(brightness);
+  uint8_t fadeBrightness = (uint8_t)(255.0 * (1.0 - t));
 
-  for (int i = SEGMENT_START; i <= SEGMENT_END; i++) {
+  int fullHalf = (SEGMENT_END - SEGMENT_START) / 2 - STATE1_EXPAND_SHORTEN_PX;
+  int rangeStart = STATE1_MID - fullHalf;
+  int rangeEnd = STATE1_MID + fullHalf;
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    int distToEdge = min(i - rangeStart, rangeEnd - i);
+    uint8_t edgeBrightness = 255;
+    if (distToEdge < STATE1_EXPAND_EDGE_FADE_PX) {
+      edgeBrightness = (uint8_t)(255.0 * distToEdge / STATE1_EXPAND_EDGE_FADE_PX);
+    }
+    CRGB c = PINK;
+    c.nscale8(edgeBrightness);
+    c.nscale8(fadeBrightness);
     leds[i] = c;
   }
   showThrottled();
 
   if (t >= 1.0) {
-    // Loop the whole sequence again instead of going dark - same
-    // delay, three comets, glow, expand, fade out, repeating until a
-    // different state command interrupts it.
+    // Section d (the last section) finishing is the end of State 1 - it
+    // just holds dark and WAITS for the next "state1" trigger. Does not
+    // loop on its own, and does not auto-advance to any other state.
     FastLED.clear();
-    showThrottled();
-    state1StageStartTime = millis();
-    state1TriggerTime = state1StageStartTime;
-    state1Comet2Started = false;
-    state1Comet3Started = false;
-    currentStage = STAGE_STATE1_DELAY;
-    Serial.println(F("State 1 sequence complete - looping..."));
+    FastLED.show(); // direct, unthrottled - see goToState(0)'s comment on why
+    currentStage = STAGE_STATE0;
+    Serial.println(F("State 1 sequence complete - holding dark, waiting for next trigger..."));
   }
 }

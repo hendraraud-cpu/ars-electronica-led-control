@@ -9,7 +9,7 @@ USAGE
 -----
     py send_state.py 1        -> state1 + 02_DOOR OPEN.MP3
     py send_state.py 2        -> state2 + 03_STATION 1.MP3
-    py send_state.py 3        -> state3 + 04_1 TRANSITION.MP3
+    py send_state.py 3        -> state3 + 04 1 TRANSITION.MP3
     py send_state.py state2   -> also works, same as "2"
 
 The script waits for the audio to finish before exiting. Press
@@ -37,7 +37,7 @@ STATE_AUDIO = {
     "state0": "01_ON HOLD.MP3",
     "state1": "02_DOOR OPEN.MP3",
     "state2": "03_STATION 1.MP3",
-    "state3": "04_1 TRANSITION.MP3",
+    "state3": "04 1 TRANSITION.MP3",
 }
 
 

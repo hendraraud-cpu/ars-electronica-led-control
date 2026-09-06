@@ -15,10 +15,13 @@ keypresses, no need to press Enter:
                   right back into itself, starting from the 00:05 mark
                   each time (not the very beginning) - so it becomes a
                   continuous idle ambience until another state interrupts.
-    1 -> State 1 (crossfades music to 02_DOOR OPEN.MP3)
+    1 -> State 1 (crossfades music to 02_DOOR OPEN.MP3). Plays through its
+                  a/b/c/d sections once, then holds dark and waits - it
+                  does NOT loop, and does NOT auto-advance to any other
+                  state. Nothing further happens until another key (or a
+                  real trigger, later) is pressed.
     2 -> State 2 (audio + light cut abruptly to 03_STATION 1.MP3, no fade)
-    3 -> State 3 (crossfades music to 04_1 TRANSITION.MP3, over 3s - faster
-                  than the default 5s crossfade the other states use)
+    3 -> State 3 (audio + light cut abruptly to 04 1 TRANSITION.MP3, no fade)
     q -> quit
 
 Note: a crossfade blocks key detection while it runs - a key pressed
@@ -49,24 +52,39 @@ AUDIO_DIR = r"F:\03_ARS\READY"
 CROSSFADE_SECONDS = 5.0  # default, used unless a state overrides it below
 
 # Per-state crossfade duration overrides. Any state not listed here uses
-# CROSSFADE_SECONDS.
+# CROSSFADE_SECONDS. (States in HARD_CUT_STATES below ignore this entirely -
+# they cut instantly instead of crossfading.)
 STATE_CROSSFADE_SECONDS = {
-    "state3": 3.0,
+    "state1": 3.0,
 }
 
 STATE_AUDIO = {
     "state0": "01_ON HOLD.MP3",
     "state1": "02_DOOR OPEN.MP3",
     "state2": "03_STATION 1.MP3",
-    "state3": "04_1 TRANSITION.MP3",
+    "state3": "04 1 TRANSITION.MP3",
 }
 
 # States listed here auto-loop when idle: once the audio finishes, if
 # nothing else has been triggered since, it crossfades right back into
 # itself, starting from this many seconds in (not the very beginning).
+# State 1 is NOT here - it doesn't loop, it hands off to State 3 (see
+# STATE_ADVANCES_TO below) once its audio finishes.
 STATE_LOOP_FROM_SECONDS = {
     "state0": 5.0,
 }
+
+# States listed here ALSO re-send their LED command at that same moment
+# they loop (see STATE_LOOP_FROM_SECONDS above).
+STATES_THAT_RESEND_LED_ON_LOOP = set()
+
+# States listed here hand off to a DIFFERENT state once their audio
+# finishes (a one-time move forward, not a loop). No LED command gets
+# sent for this - it's purely an audio hand-off, matched to whatever the
+# board is doing on its own. Empty for now - State 1 no longer
+# auto-advances to anything on the board, so the audio doesn't either;
+# it just stops when the track ends.
+STATE_ADVANCES_TO = {}
 
 # Cache folder for the trimmed "starts partway in" versions used by the
 # loop above.
@@ -119,7 +137,7 @@ def hard_cut_to(path):
 
 
 # States listed here cut abruptly (no fade) instead of crossfading.
-HARD_CUT_STATES = {"state2"}
+HARD_CUT_STATES = {"state2", "state3"}
 
 
 def get_loop_clip_path(audio_file, start_seconds):
@@ -148,6 +166,9 @@ def send_command_with_retry(arduino, command, max_attempts=3, reply_timeout=0.6)
     back in time. The board is normally reliable now, but a command sent
     at the exact wrong instant can still occasionally get dropped - this
     papers over that instead of leaving the state stuck out of sync."""
+    if arduino is None:
+        print("   (no board connected - skipping LED command, audio still plays)")
+        return False
     for attempt in range(1, max_attempts + 1):
         arduino.reset_input_buffer()
         arduino.write((command + "\n").encode())
@@ -182,10 +203,16 @@ def trigger(state, arduino):
 
 
 def main():
+    global current_state
     print(f"Connecting to Arduino on {ARDUINO_PORT}...")
-    arduino = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
-    time.sleep(2)  # let the board finish resetting after the port opens
-    print("Connected.")
+    arduino = None
+    try:
+        arduino = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
+        time.sleep(2)  # let the board finish resetting after the port opens
+        print("Connected.")
+    except serial.SerialException as e:
+        print(f"!!! Couldn't open {ARDUINO_PORT}: {e}")
+        print("!!! Continuing WITHOUT the Arduino - audio-only mode. Lights won't respond.")
 
     pygame.mixer.init()
 
@@ -211,18 +238,44 @@ def main():
                 and current_channel is not None
                 and not current_channel.get_busy()
             ):
+                if current_state in STATES_THAT_RESEND_LED_ON_LOOP and arduino is not None:
+                    print(f"\n>> {current_state} audio finished - restarting the light in sync")
+                    send_command_with_retry(arduino, current_state)
+
                 audio_file = STATE_AUDIO[current_state]
                 start_seconds = STATE_LOOP_FROM_SECONDS[current_state]
                 loop_path = get_loop_clip_path(audio_file, start_seconds)
                 duration = STATE_CROSSFADE_SECONDS.get(current_state, CROSSFADE_SECONDS)
-                print(f"\n>> {current_state} looping (from {start_seconds}s), crossfade over {duration}s")
+                print(f"   crossfading audio back in (from {start_seconds}s) over {duration}s")
                 crossfade_to(loop_path, duration)
+
+            # One-time hand-off: some states move forward into a different
+            # state once their audio finishes, instead of looping. No LED
+            # command is sent - the board already advances itself; this
+            # just brings the audio along with it.
+            elif (
+                current_state in STATE_ADVANCES_TO
+                and current_channel is not None
+                and not current_channel.get_busy()
+            ):
+                next_state = STATE_ADVANCES_TO[current_state]
+                path = AUDIO_DIR + "\\" + STATE_AUDIO[next_state]
+                print(f"\n>> {current_state} audio finished - advancing to {next_state}")
+                if next_state in HARD_CUT_STATES:
+                    print(f"   cutting abruptly to {STATE_AUDIO[next_state]}")
+                    hard_cut_to(path)
+                else:
+                    duration = STATE_CROSSFADE_SECONDS.get(next_state, CROSSFADE_SECONDS)
+                    print(f"   crossfading to {STATE_AUDIO[next_state]} over {duration}s")
+                    crossfade_to(path, duration)
+                current_state = next_state
 
             time.sleep(0.05)
     except KeyboardInterrupt:
         pass
 
-    arduino.close()
+    if arduino is not None:
+        arduino.close()
     print("\nClosed connection. Bye.")
 
 

@@ -58,10 +58,10 @@ SHOW = [
     # Set TIME below to whenever State 2 should actually begin:
     # (TIME, "led",       "state2"),
     # (TIME, "crossfade", "03_STATION 1.MP3"),
-    # When State 3 starts, 04_1 TRANSITION.MP3 begins playing.
+    # When State 3 starts, 04 1 TRANSITION.MP3 begins playing.
     # Set TIME below to whenever State 3 should actually begin:
     # (TIME, "led",   "state3"),
-    # (TIME, "audio", "04_1 TRANSITION.MP3"),
+    # (TIME, "audio", "04 1 TRANSITION.MP3"),
 ]
 # ---------------------------------------------------------------------
 

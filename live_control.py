@@ -21,7 +21,19 @@ keypresses, no need to press Enter:
                   state. Nothing further happens until another key (or a
                   real trigger, later) is pressed.
     2 -> State 2 (audio + light cut abruptly to 03_STATION 1.MP3, no fade)
-    3 -> State 3 (audio + light cut abruptly to 04 1 TRANSITION.MP3, no fade)
+    3 -> State 3 (audio + light cut abruptly to 04 1 TRANSITION.MP3, no fade).
+                  Drives BOTH Arduinos together - the main strip (COM8)
+                  does its comet sequence, and the second strip (COM7)
+                  runs its own breathe + expand sequence at the same time.
+                  Once this track finishes, it automatically hands off to
+                  State 4 (see below) - no key press needed.
+    4 -> State 4 (audio cut abruptly to 05_STATION 2 (1).MP3). Only the 2nd
+                  strip (COM7) reacts - it switches to the station2 60px
+                  breathing section. The main strip (COM8) is untouched.
+                  Triggers automatically when State 3's track ends, or
+                  any time by pressing "4" directly.
+                  Any state other than 3/4 blanks the 2nd strip (COM7),
+                  since it's only ever active during States 3 and 4.
     q -> quit
 
 Note: a crossfade blocks key detection while it runs - a key pressed
@@ -47,6 +59,7 @@ import pygame
 import imageio_ffmpeg
 
 ARDUINO_PORT = "COM8"
+ARDUINO2_PORT = "COM7"  # second Arduino/strip - only ever active during State 3
 BAUD_RATE = 115200
 AUDIO_DIR = r"F:\03_ARS\READY"
 CROSSFADE_SECONDS = 5.0  # default, used unless a state overrides it below
@@ -63,6 +76,7 @@ STATE_AUDIO = {
     "state1": "02_DOOR OPEN.MP3",
     "state2": "03_STATION 1.MP3",
     "state3": "04 1 TRANSITION.MP3",
+    "state4": "05_STATION 2 (1).MP3",
 }
 
 # States listed here auto-loop when idle: once the audio finishes, if
@@ -79,12 +93,20 @@ STATE_LOOP_FROM_SECONDS = {
 STATES_THAT_RESEND_LED_ON_LOOP = set()
 
 # States listed here hand off to a DIFFERENT state once their audio
-# finishes (a one-time move forward, not a loop). No LED command gets
-# sent for this - it's purely an audio hand-off, matched to whatever the
-# board is doing on its own. Empty for now - State 1 no longer
-# auto-advances to anything on the board, so the audio doesn't either;
-# it just stops when the track ends.
-STATE_ADVANCES_TO = {}
+# finishes (a one-time move forward, not a loop). State 3's track hands
+# off to State 4 once it ends - State 4 can also still be triggered
+# manually by pressing "4" at any other time.
+STATE_ADVANCES_TO = {
+    "state3": "state4",
+}
+
+# What to send the 2nd Arduino (COM7) for each state - it only ever
+# reacts to State 3 (its own breathe+expand sequence) and State 4 (the
+# station2 60px section); anything else blanks its strip.
+ARDUINO2_COMMAND = {
+    "state3": "state3",
+    "state4": "station2",
+}
 
 # Cache folder for the trimmed "starts partway in" versions used by the
 # loop above.
@@ -95,6 +117,7 @@ KEY_TO_STATE = {
     "1": "state1",
     "2": "state2",
     "3": "state3",
+    "4": "state4",
 }
 
 current_channel = None  # the Channel actually playing right now - volume
@@ -137,7 +160,7 @@ def hard_cut_to(path):
 
 
 # States listed here cut abruptly (no fade) instead of crossfading.
-HARD_CUT_STATES = {"state2", "state3"}
+HARD_CUT_STATES = {"state2", "state3", "state4"}
 
 
 def get_loop_clip_path(audio_file, start_seconds):
@@ -184,11 +207,24 @@ def send_command_with_retry(arduino, command, max_attempts=3, reply_timeout=0.6)
     return False
 
 
-def trigger(state, arduino):
+def trigger(state, arduino, arduino2):
     global current_state
     current_state = state
     print(f"\n>> {state}")
-    send_command_with_retry(arduino, state)
+
+    # State 4 only involves the 2nd Arduino (COM7) - the main board
+    # (COM8) doesn't recognize "state4" at all, so if State 3's comet
+    # sequence is still running there when State 4 is triggered manually
+    # (before State 3's own sequence has finished on its own), it would
+    # otherwise just keep playing in the background. Send "state0"
+    # instead to explicitly cancel it.
+    main_command = "state0" if state == "state4" else state
+    send_command_with_retry(arduino, main_command)
+
+    # The second Arduino (COM7) only ever reacts to States 3 and 4 (see
+    # ARDUINO2_COMMAND above) - anything else blanks its strip instead of
+    # staying lit from a previous State 3/4.
+    send_command_with_retry(arduino2, ARDUINO2_COMMAND.get(state, "state0"))
 
     audio_file = STATE_AUDIO.get(state)
     if audio_file:
@@ -214,9 +250,19 @@ def main():
         print(f"!!! Couldn't open {ARDUINO_PORT}: {e}")
         print("!!! Continuing WITHOUT the Arduino - audio-only mode. Lights won't respond.")
 
+    print(f"Connecting to 2nd Arduino on {ARDUINO2_PORT}...")
+    arduino2 = None
+    try:
+        arduino2 = serial.Serial(ARDUINO2_PORT, BAUD_RATE, timeout=1)
+        time.sleep(2)  # let the board finish resetting after the port opens
+        print("Connected.")
+    except serial.SerialException as e:
+        print(f"!!! Couldn't open {ARDUINO2_PORT}: {e}")
+        print("!!! Continuing WITHOUT the 2nd Arduino - State 3's 2nd strip won't respond.")
+
     pygame.mixer.init()
 
-    print("\nReady. Press 0, 1, 2, or 3 to trigger a state. Press q to quit.\n")
+    print("\nReady. Press 0, 1, 2, 3, or 4 to trigger a state. Press q to quit.\n")
 
     try:
         while True:
@@ -226,7 +272,7 @@ def main():
                     break
                 state = KEY_TO_STATE.get(key)
                 if state:
-                    trigger(state, arduino)
+                    trigger(state, arduino, arduino2)
                 else:
                     print(f"(no state mapped to '{key}')")
 
@@ -250,9 +296,8 @@ def main():
                 crossfade_to(loop_path, duration)
 
             # One-time hand-off: some states move forward into a different
-            # state once their audio finishes, instead of looping. No LED
-            # command is sent - the board already advances itself; this
-            # just brings the audio along with it.
+            # state once their audio finishes, instead of looping. State
+            # 3 hands off to State 4 this way (see STATE_ADVANCES_TO).
             elif (
                 current_state in STATE_ADVANCES_TO
                 and current_channel is not None
@@ -261,6 +306,14 @@ def main():
                 next_state = STATE_ADVANCES_TO[current_state]
                 path = AUDIO_DIR + "\\" + STATE_AUDIO[next_state]
                 print(f"\n>> {current_state} audio finished - advancing to {next_state}")
+
+                # Same cancellation as in trigger(): State 4 doesn't touch
+                # the main board (COM8), so explicitly cancel whatever
+                # State 3 was doing there instead of leaving it running.
+                main_command = "state0" if next_state == "state4" else next_state
+                send_command_with_retry(arduino, main_command)
+                send_command_with_retry(arduino2, ARDUINO2_COMMAND.get(next_state, "state0"))
+
                 if next_state in HARD_CUT_STATES:
                     print(f"   cutting abruptly to {STATE_AUDIO[next_state]}")
                     hard_cut_to(path)
@@ -276,6 +329,8 @@ def main():
 
     if arduino is not None:
         arduino.close()
+    if arduino2 is not None:
+        arduino2.close()
     print("\nClosed connection. Bye.")
 
 

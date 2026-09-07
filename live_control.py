@@ -15,11 +15,13 @@ keypresses, no need to press Enter:
                   right back into itself, starting from the 00:05 mark
                   each time (not the very beginning) - so it becomes a
                   continuous idle ambience until another state interrupts.
-    1 -> State 1 (crossfades music to 02_DOOR OPEN.MP3). Plays through its
-                  a/b/c/d sections once, then holds dark and waits - it
-                  does NOT loop, and does NOT auto-advance to any other
-                  state. Nothing further happens until another key (or a
-                  real trigger, later) is pressed.
+    1 -> State 1 (crossfades music to 02_DOOR OPEN.MP3 over 3s). Plays
+                  through its a/b/c sections once - section c's expand
+                  holds and breathes (not fading out) for the rest of the
+                  track. Once the track ends, the whole thing starts over
+                  from 0:00 automatically, cutting instantly (no crossfade,
+                  unlike the 3s fade used the first time it's triggered),
+                  and a fresh "state1" is sent to reset the LEDs to section a.
     2 -> State 2 (audio + light cut abruptly to 03_STATION 1.MP3, no fade)
     3 -> State 3 (audio + light cut abruptly to 04 1 TRANSITION.MP3, no fade).
                   Drives BOTH Arduinos together - the main strip (COM8)
@@ -32,14 +34,16 @@ keypresses, no need to press Enter:
                   breathing section. The main strip (COM8) is untouched.
                   Triggers automatically when State 3's track ends, or
                   any time by pressing "4" directly.
-                  Any state other than 3/4 blanks the 2nd strip (COM7),
-                  since it's only ever active during States 3 and 4.
+                  Any state other than 3/4/5 blanks the 2nd strip (COM7),
+                  since it's only ever active during States 3, 4, and 5.
     6 -> State 6 (audio cut abruptly to 07_STATION 3.MP3). Audio only for
                   now - no LED behavior defined yet.
-    x -> State 5, mode X (audio cut abruptly to 05_x STATION2.MP3). Audio
-                  only for now - no LED behavior defined yet.
-    z -> State 5, mode Z (audio cut abruptly to 05_z STATION2.MP3). Audio
-                  only for now - no LED behavior defined yet.
+    x -> State 5, mode X (audio cut abruptly to 05_x STATION2.MP3). The 2nd
+                  strip (COM7) lights up a solid 60px section - same
+                  position/length as State 3's expansion2 core. The main
+                  strip (COM8) is untouched.
+    z -> State 5, mode Z (audio cut abruptly to 05_z STATION2.MP3). Same
+                  LED behavior as mode X above.
     7 -> State 7 (audio cut abruptly to 08_REVEALING CHAMBER.mp3). Audio
                   only for now - no LED behavior defined yet.
     q -> quit
@@ -74,10 +78,26 @@ CROSSFADE_SECONDS = 5.0  # default, used unless a state overrides it below
 
 # Per-state crossfade duration overrides. Any state not listed here uses
 # CROSSFADE_SECONDS. (States in HARD_CUT_STATES below ignore this entirely -
-# they cut instantly instead of crossfading.)
+# they cut instantly instead of crossfading.) This applies to the initial
+# trigger only - see STATE_LOOP_CROSSFADE_SECONDS below for the crossfade
+# used specifically when a state loops back into itself.
 STATE_CROSSFADE_SECONDS = {
     "state1": 3.0,
 }
+
+# Per-state crossfade duration overrides used ONLY when a state in
+# STATE_LOOP_FROM_SECONDS loops back into itself - falls back to
+# STATE_CROSSFADE_SECONDS/CROSSFADE_SECONDS for any state not listed here.
+# (Doesn't apply to states in STATE_LOOP_HARD_CUT below - those skip the
+# crossfade entirely.)
+STATE_LOOP_CROSSFADE_SECONDS = {}
+
+# States listed here cut abruptly (no fade) specifically when they loop
+# back into themselves - separate from HARD_CUT_STATES below, which is
+# only about a state's INITIAL trigger. State 1 still crossfades in the
+# first time it's triggered, but restarts instantly with no fade once it
+# loops back to 0:00.
+STATE_LOOP_HARD_CUT = {"state1"}
 
 STATE_AUDIO = {
     "state0": "01_ON HOLD.MP3",
@@ -94,15 +114,18 @@ STATE_AUDIO = {
 # States listed here auto-loop when idle: once the audio finishes, if
 # nothing else has been triggered since, it crossfades right back into
 # itself, starting from this many seconds in (not the very beginning).
-# State 1 is NOT here - it doesn't loop, it hands off to State 3 (see
-# STATE_ADVANCES_TO below) once its audio finishes.
+# State 1 restarts from the true beginning (0.0s) once its track ends,
+# resetting the LEDs back to section a in sync (see
+# STATES_THAT_RESEND_LED_ON_LOOP below).
 STATE_LOOP_FROM_SECONDS = {
     "state0": 5.0,
+    "state1": 0.0,
+    "state5_x": 3 + 14 / 30,  # 00:00:03:14 at 30fps
 }
 
 # States listed here ALSO re-send their LED command at that same moment
 # they loop (see STATE_LOOP_FROM_SECONDS above).
-STATES_THAT_RESEND_LED_ON_LOOP = set()
+STATES_THAT_RESEND_LED_ON_LOOP = {"state1"}
 
 # States listed here hand off to a DIFFERENT state once their audio
 # finishes (a one-time move forward, not a loop). State 3's track hands
@@ -113,11 +136,15 @@ STATE_ADVANCES_TO = {
 }
 
 # What to send the 2nd Arduino (COM7) for each state - it only ever
-# reacts to State 3 (its own breathe+expand sequence) and State 4 (the
-# station2 60px section); anything else blanks its strip.
+# reacts to State 3 (its own breathe+expand sequence), State 4 (the
+# station2 60px section), and both State 5 modes (a solid 60px section,
+# same position/length as expansion2's core); anything else blanks its
+# strip.
 ARDUINO2_COMMAND = {
     "state3": "state3",
     "state4": "station2",
+    "state5_x": "state5",
+    "state5_z": "state5",
 }
 
 # Cache folder for the trimmed "starts partway in" versions used by the
@@ -206,17 +233,24 @@ def send_command_with_retry(arduino, command, max_attempts=3, reply_timeout=0.6)
     at the exact wrong instant can still occasionally get dropped - this
     papers over that instead of leaving the state stuck out of sync."""
     if arduino is None:
-        print("   (no board connected - skipping LED command, audio still plays)")
+        print("   (this board isn't connected - skipping)")
         return False
     for attempt in range(1, max_attempts + 1):
-        arduino.reset_input_buffer()
-        arduino.write((command + "\n").encode())
-        end = time.time() + reply_timeout
-        while time.time() < end:
-            line = arduino.readline()
-            if line:
-                print(f"   board: {line.decode(errors='replace').strip()}")
-                return True
+        try:
+            arduino.reset_input_buffer()
+            arduino.write((command + "\n").encode())
+            end = time.time() + reply_timeout
+            while time.time() < end:
+                line = arduino.readline()
+                if line:
+                    print(f"   board: {line.decode(errors='replace').strip()}")
+                    return True
+        except serial.SerialException as e:
+            # The connection can drop or glitch mid-session (a loose USB
+            # cable, the board resetting) even though it opened fine at
+            # startup - treat that the same as a dropped command instead
+            # of crashing the whole script.
+            print(f"   !!! serial error talking to the board: {e}")
         if attempt < max_attempts:
             print(f"   (no reply, retrying - attempt {attempt + 1}/{max_attempts})")
     print("   !!! board didn't respond after retries - check the connection !!!")
@@ -256,6 +290,9 @@ def trigger(state, arduino, arduino2):
 
 def main():
     global current_state
+    # Each board connects independently - either one can be missing right
+    # now (e.g. only COM7 plugged in) and the script just skips sending
+    # it commands, no special "mode" around it.
     print(f"Connecting to Arduino on {ARDUINO_PORT}...")
     arduino = None
     try:
@@ -264,7 +301,6 @@ def main():
         print("Connected.")
     except serial.SerialException as e:
         print(f"!!! Couldn't open {ARDUINO_PORT}: {e}")
-        print("!!! Continuing WITHOUT the Arduino - audio-only mode. Lights won't respond.")
 
     print(f"Connecting to 2nd Arduino on {ARDUINO2_PORT}...")
     arduino2 = None
@@ -274,7 +310,6 @@ def main():
         print("Connected.")
     except serial.SerialException as e:
         print(f"!!! Couldn't open {ARDUINO2_PORT}: {e}")
-        print("!!! Continuing WITHOUT the 2nd Arduino - State 3's 2nd strip won't respond.")
 
     pygame.mixer.init()
 
@@ -307,9 +342,15 @@ def main():
                 audio_file = STATE_AUDIO[current_state]
                 start_seconds = STATE_LOOP_FROM_SECONDS[current_state]
                 loop_path = get_loop_clip_path(audio_file, start_seconds)
-                duration = STATE_CROSSFADE_SECONDS.get(current_state, CROSSFADE_SECONDS)
-                print(f"   crossfading audio back in (from {start_seconds}s) over {duration}s")
-                crossfade_to(loop_path, duration)
+                if current_state in STATE_LOOP_HARD_CUT:
+                    print(f"   cutting abruptly back to {audio_file} (from {start_seconds}s)")
+                    hard_cut_to(loop_path)
+                else:
+                    duration = STATE_LOOP_CROSSFADE_SECONDS.get(
+                        current_state, STATE_CROSSFADE_SECONDS.get(current_state, CROSSFADE_SECONDS)
+                    )
+                    print(f"   crossfading audio back in (from {start_seconds}s) over {duration}s")
+                    crossfade_to(loop_path, duration)
 
             # One-time hand-off: some states move forward into a different
             # state once their audio finishes, instead of looping. State

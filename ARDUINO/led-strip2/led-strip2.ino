@@ -9,20 +9,27 @@
                  2's on the main board) with the same slow breathing
                  idle hold - no flicker yet, that can be layered in
                  once there's a specific timeline for it.
+    "state5"   - both modes of State 5 (x and z) send this. Lights up
+                 the SAME 60-pixel section as expansion2's final core
+                 (same position and length), solid, no animation.
   Any other command ("state0"/"state1"/"state2") just blanks this strip.
 
   The active/lit section for "state3" starts at pixel 0 (SEGMENT_START) -
   back to where it was before it got shifted 50 pixels and then reverted.
-  SEGMENT_WIDTH below is a placeholder (200) - it hasn't been confirmed
-  against the real physical LED count on this strip yet. If the real
-  width is different, the expand will finish short of (or try to go
-  past) the actual strip - update SEGMENT_WIDTH once that's confirmed.
-  COLOR_ORDER is also assumed GRB, matching strip 1 - confirm if colors
-  look wrong.
+  SEGMENT_WIDTH below is a placeholder (240 - widened from 200 so
+  station2's section fits) - it hasn't been confirmed against the real
+  physical LED count on this strip yet. If the real width is different,
+  the expand will finish short of (or try to go past) the actual strip -
+  update SEGMENT_WIDTH once that's confirmed. COLOR_ORDER is also
+  assumed GRB, matching strip 1 - confirm if colors look wrong.
 
-  "station2"'s own 60-pixel section (70-129) is centered on the same
-  CENTER_PIXEL (100) as State 3's expansions - a separate, narrower
-  range within the same address space.
+  "station2"'s own 60-pixel section is at pixels 110-169 - moved back 8
+  then down 2 more from 120-179, no longer exactly matching expansion2's
+  core or State 5's section (both still at 120-179) - a separate, narrower range
+  within the same address space. Expansion1 is centered on CENTER_PIXEL
+  (160); expansion2 has its own, separate center (EXPANSION2_CENTER_PIXEL,
+  150) - 10 pixels back from
+  expansion1's.
 
   TIMELINE for "state3" (from this board's own trigger, t=0):
     0 - 00:00:12:11 (12367ms)   - dark
@@ -52,11 +59,14 @@
 // Back to starting at pixel 0 (was shifted 50 pixels further, then
 // reverted back here).
 #define SEGMENT_START  0
-#define SEGMENT_WIDTH  200   // PLACEHOLDER - confirm against the real strip
+// PLACEHOLDER - confirm against the real strip. Extended from 200 to 240
+// so expansion1 (which grows to fill this whole SEGMENT_WIDTH) reaches
+// far enough for CENTER_PIXEL (160) to be a meaningful midpoint.
+#define SEGMENT_WIDTH  240
 #define SEGMENT_END    (SEGMENT_START + SEGMENT_WIDTH - 1)
 #define NUM_LEDS       (SEGMENT_END + 1)
 
-#define CENTER_PIXEL  100  // fixed midpoint for both expansion and expansion2
+#define CENTER_PIXEL  160  // fixed midpoint for expansion (expansion1) - moved 60px further (was 100)
 
 // Timeline constants (ms since this board's own "state3" trigger).
 #define BREATHE_START_MS  12367  // 00:00:12:11
@@ -64,11 +74,13 @@
 #define EXPAND_MS          1000  // 1 second
 
 // "expansion2" - shrinks from the full width back down to a 60-pixel
-// core, toward the same CENTER_PIXEL as the first expansion.
+// core, toward its OWN center point - 10 pixels back from expansion1's
+// (150 instead of 160), independent of it.
 #define SHRINK2_START_MS  23733  // 00:00:23:22
 #define SHRINK2_MS          2500  // 2.5 seconds
 #define SHRINK2_TARGET_HALF   30  // half-width of the 60px final core
-#define FULL_HALF  (CENTER_PIXEL - SEGMENT_START)  // half-width at full expand
+#define EXPANSION2_CENTER_PIXEL  (CENTER_PIXEL - 10)
+#define FULL_HALF  (EXPANSION2_CENTER_PIXEL - SEGMENT_START)  // half-width at full expand, from expansion2's own center
 #define EXPANSION2_EDGE_FADE_PX  6  // soft fade at both the core's and the
                                      // dim halo's edges, instead of a hard edge
 // How dim the "halo" pixels around the 60px core get, once expansion2
@@ -98,10 +110,10 @@
 #define BREATHE_MAX  255
 
 // "station2" - a 60-pixel section (matching State 2's width on the main
-// board), centered on the same CENTER_PIXEL (100) as State 3's
-// expansions, same slow breathe cycle as State 2's idle hold there
-// (dims to 80% over 20s, recovers over 3s, repeating).
-#define STATION2_SEGMENT_START  (CENTER_PIXEL - 30)
+// board), moved down 2 more pixels to 110-169 (was 112-171) - same slow
+// breathe cycle as State 2's idle hold there (dims to 80% over 20s,
+// recovers over 3s, repeating).
+#define STATION2_SEGMENT_START  110
 #define STATION2_SEGMENT_WIDTH  60
 #define STATION2_SEGMENT_END    (STATION2_SEGMENT_START + STATION2_SEGMENT_WIDTH - 1)
 #define STATION2_BREATHE_DIM_MS       20000
@@ -123,13 +135,20 @@ const uint8_t STATION2_FLICKER_DIP_BRIGHTNESS[] = {
 };
 #define STATION2_FLICKER_COUNT (sizeof(STATION2_FLICKER_TIMES_MS) / sizeof(unsigned long))
 
+// "state5" - same 60-pixel section as expansion2's final core (same
+// position and length), solid, no animation. Tied to expansion2's own
+// constants so they stay in sync if that position ever changes again.
+#define STATE5_SEGMENT_START  (EXPANSION2_CENTER_PIXEL - SHRINK2_TARGET_HALF)
+#define STATE5_SEGMENT_END    (EXPANSION2_CENTER_PIXEL + SHRINK2_TARGET_HALF - 1)
+
 CRGB leds[NUM_LEDS];
 CRGB STRIP2_COLOR = CRGB::White;
 
 enum Stage2 {
   STAGE2_IDLE, STAGE2_DARK_WAIT, STAGE2_BREATHE_POINT, STAGE2_EXPAND, STAGE2_HOLD,
   STAGE2_SHRINK2, STAGE2_HOLD2,
-  STAGE2_STATION2_FLICKER, STAGE2_STATION2_HOLD
+  STAGE2_STATION2_FLICKER, STAGE2_STATION2_HOLD,
+  STAGE2_STATE5_HOLD
 };
 Stage2 stage = STAGE2_IDLE;
 
@@ -164,10 +183,11 @@ void loop() {
     case STAGE2_HOLD2:        doHold2(); break;
     case STAGE2_STATION2_FLICKER: doStation2Flicker(); break;
     case STAGE2_STATION2_HOLD:    doStation2Hold(); break;
+    case STAGE2_STATE5_HOLD:      doState5Hold(); break;
   }
 }
 
-// ---------- Read "state3" / "station2" / anything else from Serial and react ----------
+// ---------- Read "state3" / "station2" / "state5" / anything else from Serial and react ----------
 void checkSerialCommand() {
   while (Serial.available() > 0) {
     char c = Serial.read();
@@ -178,6 +198,8 @@ void checkSerialCommand() {
           startState3();
         } else if (strcmp(cmdBuffer, "station2") == 0) {
           startStation2();
+        } else if (strcmp(cmdBuffer, "state5") == 0) {
+          startState5();
         } else {
           goDark();
         }
@@ -192,7 +214,7 @@ void checkSerialCommand() {
   }
 }
 
-// ---------- Any command other than "state3"/"station2" just blanks this strip ----------
+// ---------- Any command other than "state3"/"station2"/"state5" just blanks this strip ----------
 void goDark() {
   FastLED.clear();
   FastLED.show();
@@ -340,9 +362,10 @@ void renderCoreWithFade(int innerStart, int innerEnd, int outerStart, int outerE
 }
 
 // ---------- expansion2: shrinks from the full width down to a 60px core
-// centered on the same CENTER_PIXEL as the first expansion, over
-// SHRINK2_MS - the dim halo around the core shrinks right along with
-// it (not staying fixed at the full width), fading to black beyond it. ----------
+// centered on EXPANSION2_CENTER_PIXEL (its own center, 10px back from
+// expansion1's), over SHRINK2_MS - the dim halo around the core shrinks
+// right along with it (not staying fixed at the full width), fading to
+// black beyond it. ----------
 void doShrink2() {
   unsigned long elapsed = millis() - shrink2StartTime;
   float t = (float)elapsed / SHRINK2_MS;
@@ -353,13 +376,14 @@ void doShrink2() {
   int outerHalf = innerHalf + DIM_HALO_EXTRA_PX;
 
   // innerEnd/outerEnd use half-1 (not half) so the final core width
-  // lands on exactly 60 pixels (70-129) instead of 61 - CENTER_PIXEL
-  // (100) sits just inside the start half, not dead center, since 60 is
-  // an even width and can't be perfectly centered on a single pixel.
-  int innerStart = CENTER_PIXEL - innerHalf;
-  int innerEnd = CENTER_PIXEL + innerHalf - 1;
-  int outerStart = CENTER_PIXEL - outerHalf;
-  int outerEnd = CENTER_PIXEL + outerHalf - 1;
+  // lands on exactly 60 pixels (120-179) instead of 61 -
+  // EXPANSION2_CENTER_PIXEL (150) sits just inside the start half, not
+  // dead center, since 60 is an even width and can't be perfectly
+  // centered on a single pixel.
+  int innerStart = EXPANSION2_CENTER_PIXEL - innerHalf;
+  int innerEnd = EXPANSION2_CENTER_PIXEL + innerHalf - 1;
+  int outerStart = EXPANSION2_CENTER_PIXEL - outerHalf;
+  int outerEnd = EXPANSION2_CENTER_PIXEL + outerHalf - 1;
   if (innerStart < SEGMENT_START) innerStart = SEGMENT_START;
   if (innerEnd > SEGMENT_END) innerEnd = SEGMENT_END;
   if (outerStart < SEGMENT_START) outerStart = SEGMENT_START;
@@ -380,10 +404,10 @@ void doHold2() {
   int innerHalf = SHRINK2_TARGET_HALF;
   int outerHalf = innerHalf + DIM_HALO_EXTRA_PX;
 
-  int innerStart = CENTER_PIXEL - innerHalf;
-  int innerEnd = CENTER_PIXEL + innerHalf - 1;  // exactly 60px total
-  int outerStart = CENTER_PIXEL - outerHalf;
-  int outerEnd = CENTER_PIXEL + outerHalf - 1;
+  int innerStart = EXPANSION2_CENTER_PIXEL - innerHalf;
+  int innerEnd = EXPANSION2_CENTER_PIXEL + innerHalf - 1;  // exactly 60px total
+  int outerStart = EXPANSION2_CENTER_PIXEL - outerHalf;
+  int outerEnd = EXPANSION2_CENTER_PIXEL + outerHalf - 1;
   if (innerStart < SEGMENT_START) innerStart = SEGMENT_START;
   if (innerEnd > SEGMENT_END) innerEnd = SEGMENT_END;
   if (outerStart < SEGMENT_START) outerStart = SEGMENT_START;
@@ -462,6 +486,24 @@ void doStation2Hold() {
   FastLED.clear();
   for (int i = STATION2_SEGMENT_START; i <= STATION2_SEGMENT_END; i++) {
     leds[i] = c;
+  }
+  FastLED.show();
+}
+
+// ---------- Start (or restart) State 5 (both modes x and z send this) ----------
+void startState5() {
+  FastLED.clear();
+  FastLED.show();
+  stage = STAGE2_STATE5_HOLD;
+  Serial.println(F("State 5 (strip 2): 60px section solid on..."));
+}
+
+// ---------- State 5: same 60px section as expansion2's final core, solid
+// on at full brightness, no animation, forever until the next command. ----------
+void doState5Hold() {
+  FastLED.clear();
+  for (int i = STATE5_SEGMENT_START; i <= STATE5_SEGMENT_END; i++) {
+    leds[i] = STRIP2_COLOR;
   }
   FastLED.show();
 }

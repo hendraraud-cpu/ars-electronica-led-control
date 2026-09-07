@@ -98,7 +98,8 @@
 #define STATE1_EXPAND_SHORTEN_PX     6  // max reach is 6px short of the full segment, each side
 #define STATE1_EXPAND_EDGE_FADE_PX   6  // soft fade at the growing edges (not specified
                                          // exactly - matched the 6px used elsewhere)
-#define STATE1_FADEOUT_MS         2300  // fade to black at the very end (unchanged)
+#define STATE1_FADEOUT_MS         3500  // fade to black at the very end - slowed down from
+                                         // 2300ms now that it sparkles as it fades
 #define STATE1_COMET_FADE_IN_MS    400  // at the very start (time-based)
 // Keeps moving/drawing until its WHOLE trail (tail included, not just
 // the head) has passed pixel 66 - that's what actually fixes the
@@ -108,16 +109,37 @@
 #define STATE1_COMET_FADE_OUT_PX    4
 #define STATE1_CHUNK_SIZE           30  // "longer trail" - vs the usual CHUNK_SIZE (24)
 
-// Section timeline (a/b/c/d), all measured from the "state1" trigger.
+// Section c's final expand holds solid (no breathing) until this exact
+// absolute moment (00:00:28:00, measured from the "state1" trigger),
+// then starts breathing for the rest of the track.
+#define STATE1_BREATHE_START_MS  28000
+
+// Sparkle/twinkle overlay on the comet's trail: each frame, each pixel
+// in the trail has this % chance of overriding its normal fade-based
+// brightness with a random one instead (can end up brighter OR dimmer
+// than the smooth fade would give) - reads as glitter/twinkle riding on
+// top of the trail rather than a smooth gradient.
+#define STATE1_SPARKLE_CHANCE_PCT   15
+#define STATE1_SPARKLE_MIN          80
+#define STATE1_SPARKLE_MAX         255
+
+// Section c's held expand starts fading out (with the same sparkle
+// overlay as the comet) at this exact absolute moment (00:00:38:00,
+// measured from the "state1" trigger).
+#define STATE1_HOLD_FADEOUT_START_MS  38000
+
+// Section timeline (a/b/c), all measured from the "state1" trigger.
 // One full comet+glow+expand cycle takes ~9.7s on its own - shorter than
-// every section's window here, so sections a/b/c always get force-faded
-// early rather than ever completing naturally.
-#define STATE1_SECTION_COUNT 4
+// sections a/b's windows here, so they always get force-faded early
+// rather than ever completing naturally. Section c is now the LAST
+// section (section d was removed) - no forced cutoff, so its comet+glow
+// +expand plays out fully, then its expand HOLDS (not fades) for the
+// rest of the track - see doState1Hold().
+#define STATE1_SECTION_COUNT 3
 const unsigned long STATE1_SECTION_START_MS[STATE1_SECTION_COUNT] = {
   0,      // a - 0:00
   11667,  // b - 00:00:11:20 at 30fps
-  21000,  // c - 0:21
-  22533,  // d - 00:00:21:01 + 1500ms (last - no forced cutoff, plays out + fades naturally)
+  21000,  // c - 0:21 (last - holds expanded until the track ends and State 1 loops)
 };
 #define STATE1_SECTION_FADE_MS       1500  // how long the forced cut-to-black takes
 #define STATE1_SECTION_FADE_STEP_MS  20    // how often the fade decay is applied
@@ -132,7 +154,8 @@ CRGB PINK = CRGB(0xFF, 0x14, 0x5A); // #FF145A - State 1 color (and the comet)
 enum Stage {
   STAGE_STATE0,
   STAGE_STATE1_DELAY, STAGE_STATE1_COMETS, STAGE_STATE1_GLOW,
-  STAGE_STATE1_EXPAND, STAGE_STATE1_FADEOUT, STAGE_STATE1_SECTION_FADE,
+  STAGE_STATE1_EXPAND, STAGE_STATE1_FADEOUT, STAGE_STATE1_HOLD, STAGE_STATE1_HOLD_FADEOUT,
+  STAGE_STATE1_SECTION_FADE,
   STAGE_STATE2_FLICKER, STAGE_STATE2_BREATHE_INTRO, STAGE_STATE2_SOFT_FLICKER, STAGE_STATE2_HOLD,
   STAGE_STATE3_SHRINK, STAGE_STATE3_COMET, STAGE_STATE3_GLOW, STAGE_STATE3_EXPAND, STAGE_STATE3_HOLD
 };
@@ -201,6 +224,8 @@ void loop() {
     case STAGE_STATE1_GLOW:        doState1Glow(); break;
     case STAGE_STATE1_EXPAND:      doState1Expand(); break;
     case STAGE_STATE1_FADEOUT:     doState1FadeOut(); break;
+    case STAGE_STATE1_HOLD:        doState1Hold(); break;
+    case STAGE_STATE1_HOLD_FADEOUT: doState1HoldFadeOut(); break;
     case STAGE_STATE1_SECTION_FADE: doState1SectionFade(); break;
     case STAGE_STATE2_FLICKER:      doState2Flicker(); break;
     case STAGE_STATE2_BREATHE_INTRO: doState2BreatheIntro(); break;
@@ -393,9 +418,17 @@ void drawState1Comet(float pos, uint8_t fadeInBrightness, int fadeOutPx, int tra
       endFade = (uint8_t)(255.0 * frac);
     }
 
+    // Sparkle overlay: some pixels randomly override their fade-based
+    // brightness each frame, so the trail glitters instead of just
+    // smoothly fading.
+    uint8_t sparkleBrightness = tailFade;
+    if (random8() < (uint8_t)((uint16_t)STATE1_SPARKLE_CHANCE_PCT * 255 / 100)) {
+      sparkleBrightness = random8(STATE1_SPARKLE_MIN, STATE1_SPARKLE_MAX + 1);
+    }
+
     CRGB c = PINK;
     c.nscale8(fadeInBrightness);
-    c.nscale8(tailFade);
+    c.nscale8(sparkleBrightness);
     c.nscale8(endFade);
     leds[px] = c;
   }
@@ -476,21 +509,67 @@ void doState1Expand() {
   showThrottled();
 
   if (t >= 1.0) {
-    state1StageStartTime = millis();
-    currentStage = STAGE_STATE1_FADEOUT;
-    Serial.println(F("State 1 fully expanded - fading out..."));
+    // Only section c (the LAST section) holds here permanently - a/b
+    // still fade out as before if their own expand ever completes
+    // naturally, so checkState1SectionCutoff() (which watches
+    // STAGE_STATE1_FADEOUT but not STAGE_STATE1_HOLD) can still force
+    // them onward to the next section. Without this check, a/b would
+    // get stuck in the permanent hold and b/c would never play at all.
+    bool isLastSection = (state1SectionIndex + 1 >= STATE1_SECTION_COUNT);
+    if (isLastSection) {
+      currentStage = STAGE_STATE1_HOLD;
+      Serial.println(F("State 1 fully expanded - holding until the track loops..."));
+    } else {
+      state1StageStartTime = millis();
+      currentStage = STAGE_STATE1_FADEOUT;
+      Serial.println(F("State 1 fully expanded - fading out..."));
+    }
   }
 }
 
-// ---------- Fade the fully-expanded segment to black, then go dark (State 0) ----------
-// Uses the SAME shortened range + soft tapered ends as the final frame of
-// doState1Expand() - keeping the gradient at the tips instead of jumping to
-// a flat, full-width, hard-edged block right as the fade begins.
-void doState1FadeOut() {
-  unsigned long elapsed = millis() - state1StageStartTime;
-  float t = (float)elapsed / STATE1_FADEOUT_MS;
-  if (t > 1.0) t = 1.0;
+// ---------- Holds section c's fully-expanded look, solid until
+// STATE1_BREATHE_START_MS (00:00:28:00, absolute from the "state1"
+// trigger), then breathes for the rest of the track - no fade. State 1
+// doesn't loop or auto-advance on its own; it just keeps holding/
+// breathing here until the next external trigger (matches how State
+// 2's/3's own holds behave). ----------
+void doState1Hold() {
+  int fullHalf = (SEGMENT_END - SEGMENT_START) / 2 - STATE1_EXPAND_SHORTEN_PX;
+  int rangeStart = STATE1_MID - fullHalf;
+  int rangeEnd = STATE1_MID + fullHalf;
 
+  uint8_t breath = 255;
+  if (millis() - state1TriggerTime >= STATE1_BREATHE_START_MS) {
+    breath = beatsin8(9, 20, 255);
+  }
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    int distToEdge = min(i - rangeStart, rangeEnd - i);
+    uint8_t brightness = 255;
+    if (distToEdge < STATE1_EXPAND_EDGE_FADE_PX) {
+      brightness = (uint8_t)(255.0 * distToEdge / STATE1_EXPAND_EDGE_FADE_PX);
+    }
+    CRGB c = PINK;
+    c.nscale8(brightness);
+    c.nscale8(breath);
+    leds[i] = c;
+  }
+  showThrottled();
+
+  if (millis() - state1TriggerTime >= STATE1_HOLD_FADEOUT_START_MS) {
+    state1StageStartTime = millis();
+    currentStage = STAGE_STATE1_HOLD_FADEOUT;
+    Serial.println(F("State 1 hold - starting sparkling fade-out..."));
+  }
+}
+
+// ---------- Shared by doState1HoldFadeOut() and doState1FadeOut() - fades
+// the fully-expanded segment to black over STATE1_FADEOUT_MS, sparkling
+// as it goes (same random-override overlay as the comet's trail, so
+// glints of light pop up here and there as it dies out instead of a
+// plain, even dim-down). Returns true once the fade has fully completed. ----------
+bool renderState1SparkleFadeOut(float t) {
   uint8_t fadeBrightness = (uint8_t)(255.0 * (1.0 - t));
 
   int fullHalf = (SEGMENT_END - SEGMENT_START) / 2 - STATE1_EXPAND_SHORTEN_PX;
@@ -504,17 +583,46 @@ void doState1FadeOut() {
     if (distToEdge < STATE1_EXPAND_EDGE_FADE_PX) {
       edgeBrightness = (uint8_t)(255.0 * distToEdge / STATE1_EXPAND_EDGE_FADE_PX);
     }
+
+    uint8_t sparkleBrightness = fadeBrightness;
+    if (random8() < (uint8_t)((uint16_t)STATE1_SPARKLE_CHANCE_PCT * 255 / 100)) {
+      sparkleBrightness = random8(STATE1_SPARKLE_MIN, STATE1_SPARKLE_MAX + 1);
+    }
+
     CRGB c = PINK;
     c.nscale8(edgeBrightness);
-    c.nscale8(fadeBrightness);
+    c.nscale8(sparkleBrightness);
     leds[i] = c;
   }
   showThrottled();
 
-  if (t >= 1.0) {
-    // Section d (the last section) finishing is the end of State 1 - it
-    // just holds dark and WAITS for the next "state1" trigger. Does not
-    // loop on its own, and does not auto-advance to any other state.
+  return t >= 1.0;
+}
+
+// ---------- Fades section c's held expand to black (sparkling), then
+// holds dark waiting for the next trigger/loop. ----------
+void doState1HoldFadeOut() {
+  unsigned long elapsed = millis() - state1StageStartTime;
+  float t = (float)elapsed / STATE1_FADEOUT_MS;
+  if (t > 1.0) t = 1.0;
+
+  if (renderState1SparkleFadeOut(t)) {
+    FastLED.clear();
+    FastLED.show(); // direct, unthrottled - see goToState(0)'s comment on why
+    currentStage = STAGE_STATE0;
+    Serial.println(F("State 1 sparkling fade-out complete - holding dark, waiting..."));
+  }
+}
+
+// ---------- Fade the fully-expanded segment to black (sparkling), then go
+// dark (State 0) - reached if a/b's own expand ever completes naturally
+// before being force-cut to the next section. ----------
+void doState1FadeOut() {
+  unsigned long elapsed = millis() - state1StageStartTime;
+  float t = (float)elapsed / STATE1_FADEOUT_MS;
+  if (t > 1.0) t = 1.0;
+
+  if (renderState1SparkleFadeOut(t)) {
     FastLED.clear();
     FastLED.show(); // direct, unthrottled - see goToState(0)'s comment on why
     currentStage = STAGE_STATE0;

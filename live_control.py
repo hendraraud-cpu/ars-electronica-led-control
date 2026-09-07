@@ -34,6 +34,14 @@ keypresses, no need to press Enter:
                   any time by pressing "4" directly.
                   Any state other than 3/4 blanks the 2nd strip (COM7),
                   since it's only ever active during States 3 and 4.
+    6 -> State 6 (audio cut abruptly to 07_STATION 3.MP3). Audio only for
+                  now - no LED behavior defined yet.
+    x -> State 5, mode X (audio cut abruptly to 05_x STATION2.MP3). Audio
+                  only for now - no LED behavior defined yet.
+    z -> State 5, mode Z (audio cut abruptly to 05_z STATION2.MP3). Audio
+                  only for now - no LED behavior defined yet.
+    7 -> State 7 (audio cut abruptly to 08_REVEALING CHAMBER.mp3). Audio
+                  only for now - no LED behavior defined yet.
     q -> quit
 
 Note: a crossfade blocks key detection while it runs - a key pressed
@@ -77,6 +85,10 @@ STATE_AUDIO = {
     "state2": "03_STATION 1.MP3",
     "state3": "04 1 TRANSITION.MP3",
     "state4": "05_STATION 2 (1).MP3",
+    "state5_x": "05_x STATION2.MP3",  # State 5, mode X
+    "state5_z": "05_z STATION2.MP3",  # State 5, mode Z
+    "state6": "07_STATION 3.MP3",
+    "state7": "08_REVEALING CHAMBER.mp3",
 }
 
 # States listed here auto-loop when idle: once the audio finishes, if
@@ -118,6 +130,10 @@ KEY_TO_STATE = {
     "2": "state2",
     "3": "state3",
     "4": "state4",
+    "6": "state6",
+    "x": "state5_x",
+    "z": "state5_z",
+    "7": "state7",
 }
 
 current_channel = None  # the Channel actually playing right now - volume
@@ -160,7 +176,7 @@ def hard_cut_to(path):
 
 
 # States listed here cut abruptly (no fade) instead of crossfading.
-HARD_CUT_STATES = {"state2", "state3", "state4"}
+HARD_CUT_STATES = {"state2", "state3", "state4", "state5_x", "state5_z", "state6", "state7"}
 
 
 def get_loop_clip_path(audio_file, start_seconds):
@@ -262,7 +278,7 @@ def main():
 
     pygame.mixer.init()
 
-    print("\nReady. Press 0, 1, 2, 3, or 4 to trigger a state. Press q to quit.\n")
+    print("\nReady. Press 0, 1, 2, 3, 4, 6, 7, x, or z to trigger a state. Press q to quit.\n")
 
     try:
         while True:

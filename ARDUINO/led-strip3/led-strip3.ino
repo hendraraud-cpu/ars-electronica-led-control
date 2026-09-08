@@ -22,14 +22,21 @@
                     (0.48 px/ms), with a brief 7px-wide glow (3px each
                     side of the midpoint) between passes, same rhythm as
                     the comets landing
-    "state6"  - sent when State 6 (the bass drop) is triggered, but only
-                  does anything if this strip is currently mid-state5z-
-                  hold (STAGE3_HOLD - the settled red breathing section):
-                  quickly (STATE6_SHRINK_MS) turns white and shrinks the
-                  60px section in by STATE6_SHRINK_PX (3) pixels on each
-                  side, then holds there breathing white forever. If
-                  state6 arrives at any other time, it just blanks the
-                  strip like every other unhandled command.
+    "state6"  - sent when State 6 (the bass drop) is triggered. Has two
+                  different entry transitions depending what this strip
+                  was doing, both landing on the same final section/
+                  color:
+                    - mid-state5z-hold (STAGE3_HOLD, the settled red
+                      breathing section): quickly (STATE6_SHRINK_MS)
+                      turns white and shrinks the 60px section in by
+                      STATE6_SHRINK_PX (3) pixels on each side
+                    - mid-state5x (STAGE3_X_WAIT/X_COMET/X_GLOW - no lit
+                      section to shrink from there): expands OUT from
+                      the midpoint (73) to that same target section/
+                      color instead, over STATE6_EXPAND_MS
+                  Either way it then holds there breathing white
+                  forever. If state6 arrives at any other time, it just
+                  blanks the strip like every other unhandled command.
   Any other command just blanks this strip.
 
   NUM_LEDS is a placeholder (190) - hasn't been confirmed against the
@@ -92,6 +99,12 @@
 #define STATE6_SHRINK_MS  300
 #define STATE6_TARGET_START  (SEGMENT_START + STATE6_SHRINK_PX)
 #define STATE6_TARGET_END    (SEGMENT_END - STATE6_SHRINK_PX)
+// If triggered instead while mid-state5x (no lit section to shrink from -
+// it's always mid-comet or mid-glow), state6 expands OUT from the
+// midpoint (73) to the same target section/color above, mirroring
+// doExpand()'s own point-to-section expand (EXPAND_MS) rather than a
+// shrink.
+#define STATE6_EXPAND_MS  400
 
 CRGB leds[NUM_LEDS];
 CRGB STRIP3_COLOR = CRGB::Red;
@@ -100,7 +113,7 @@ CRGB STATE6_COLOR = CRGB::White;
 enum Stage3 {
   STAGE3_IDLE, STAGE3_WAIT, STAGE3_COMET, STAGE3_EXPAND, STAGE3_HOLD,
   STAGE3_X_WAIT, STAGE3_X_COMET, STAGE3_X_GLOW,
-  STAGE3_STATE6_SHRINK, STAGE3_STATE6_HOLD
+  STAGE3_STATE6_SHRINK, STAGE3_STATE6_EXPAND, STAGE3_STATE6_HOLD
 };
 Stage3 stage = STAGE3_IDLE;
 
@@ -131,6 +144,7 @@ void loop() {
     case STAGE3_X_COMET: doXComet(); break;
     case STAGE3_X_GLOW:  doXGlow(); break;
     case STAGE3_STATE6_SHRINK: doState6Shrink(); break;
+    case STAGE3_STATE6_EXPAND: doState6Expand(); break;
     case STAGE3_STATE6_HOLD:   doState6Hold(); break;
   }
 }
@@ -148,6 +162,9 @@ void checkSerialCommand() {
           startState5x();
         } else if (strcmp(cmdBuffer, "state6") == 0 && stage == STAGE3_HOLD) {
           startState6Shrink();
+        } else if (strcmp(cmdBuffer, "state6") == 0 &&
+                   (stage == STAGE3_X_WAIT || stage == STAGE3_X_COMET || stage == STAGE3_X_GLOW)) {
+          startState6ExpandFromMidpoint();
         } else {
           goDark();
         }
@@ -304,6 +321,45 @@ void doState6Shrink() {
 
   int rangeStart = SEGMENT_START + (int)(STATE6_SHRINK_PX * t);
   int rangeEnd = SEGMENT_END - (int)(STATE6_SHRINK_PX * t);
+
+  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
+  CRGB c = STATE6_COLOR;
+  c.nscale8(breath);
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    leds[i] = c;
+  }
+  FastLED.show();
+
+  if (t >= 1.0) {
+    stage = STAGE3_STATE6_HOLD;
+    Serial.println(F("State 6 (strip 3): holding white, shrunk 3px each side..."));
+  }
+}
+
+// ---------- "state6" (bass drop), only reachable from the state5x
+// stages (STAGE3_X_WAIT/X_COMET/X_GLOW) - there's no lit section to
+// shrink from there (state5x is always mid-comet or mid-glow), so
+// instead it expands OUT from the midpoint (73) to the same target
+// section/color STAGE3_STATE6_HOLD settles on, over STATE6_EXPAND_MS ----------
+void startState6ExpandFromMidpoint() {
+  stageStartTime = millis();
+  stage = STAGE3_STATE6_EXPAND;
+  Serial.println(F("State 6 (strip 3): bass drop - expanding from midpoint to white..."));
+}
+
+void doState6Expand() {
+  unsigned long elapsed = millis() - stageStartTime;
+  float t = (float)elapsed / STATE6_EXPAND_MS;
+  if (t > 1.0) t = 1.0;
+
+  // Lerp each edge independently from CENTER_PIXEL to its own target -
+  // the target section isn't perfectly centered on CENTER_PIXEL (same
+  // off-by-one as the rest of this section's math), so this lands
+  // exactly on STATE6_TARGET_START/END at t=1.0 either way.
+  int rangeStart = CENTER_PIXEL - (int)((CENTER_PIXEL - STATE6_TARGET_START) * t);
+  int rangeEnd   = CENTER_PIXEL + (int)((STATE6_TARGET_END - CENTER_PIXEL) * t);
 
   uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
   CRGB c = STATE6_COLOR;

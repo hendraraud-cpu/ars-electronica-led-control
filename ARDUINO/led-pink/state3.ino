@@ -150,26 +150,34 @@ void doState3Shrink() {
 }
 
 // ---------- Draws the comet's trail at a given (fractional) head
-// position - same shape as State 1's drawState1Comet(), just melting
-// into STATE3_COMET_END (the far end of the strip) instead of pixel 66,
-// and using STATE3_COLOR instead of PINK. Lower bound is
-// STATE3_SWING_TARGET (56), not STATE3_START_PIXEL (66) - the comet now
-// dips 10px below its launch point during the swing-down wind-up
-// before heading forward, so the trail needs room to show there too. ----------
-void drawState3Comet(float pos, uint8_t fadeInBrightness) {
+// position - same shape as State 1's drawState1Comet(), melting into
+// STATE3_COMET_END (the far end of the strip) once heading forward, and
+// using STATE3_COLOR instead of PINK. `swinging` flips which side the
+// trail sits on: while swinging DOWN (decreasing pixels), the trail
+// trails BEHIND at higher pixels (it's moving down, so behind = above);
+// once heading forward (increasing pixels), the trail sits behind at
+// lower pixels, same as always - so it's a real trailing comet in both
+// directions instead of a fixed-direction shape that looks backwards
+// during the dip. No melt-into-target fade while swinging (that only
+// makes sense approaching STATE3_COMET_END, which the swing isn't
+// anywhere near). ----------
+void drawState3Comet(float pos, uint8_t fadeInBrightness, bool swinging) {
   int headPos = (int)pos;
+  int trailStep = swinging ? 1 : -1;
   for (int offset = 0; offset < STATE3_TRAIL_LENGTH; offset++) {
-    int px = headPos - offset;
+    int px = headPos + trailStep * offset;
     if (px < STATE3_SWING_TARGET || px >= NUM_LEDS) continue;
 
     uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE3_TRAIL_LENGTH - 1));
 
     uint8_t endFade = 255;
-    int distToEnd = STATE3_COMET_END - px;
-    if (distToEnd <= STATE3_COMET_FADE_OUT_PX) {
-      float frac = (float)distToEnd / STATE3_COMET_FADE_OUT_PX;
-      if (frac < 0) frac = 0;
-      endFade = (uint8_t)(255.0 * frac);
+    if (!swinging) {
+      int distToEnd = STATE3_COMET_END - px;
+      if (distToEnd <= STATE3_COMET_FADE_OUT_PX) {
+        float frac = (float)distToEnd / STATE3_COMET_FADE_OUT_PX;
+        if (frac < 0) frac = 0;
+        endFade = (uint8_t)(255.0 * frac);
+      }
     }
 
     CRGB c = STATE3_COLOR;
@@ -225,10 +233,11 @@ void doState3Comet() {
 
   FastLED.clear();
 
+  bool swinging = (state3ChunkRepeatIndex == 0 && absElapsed < STATE3_SWING_MS);
   float pos = state3CometPos(absElapsed);
   float tailPos = pos - (STATE3_TRAIL_LENGTH - 1);
   if (tailPos < STATE3_COMET_END) {
-    drawState3Comet(pos, state1CometFadeIn(absElapsed, true));
+    drawState3Comet(pos, state1CometFadeIn(absElapsed, true), swinging);
     showThrottled();
   } else {
     state3StageStartTime = millis();

@@ -129,11 +129,18 @@ void doState3Shrink() {
   for (int i = rangeStart; i <= rangeEnd; i++) {
     // Soft edges: dimmer near the retreating ends (rangeStart/rangeEnd),
     // full brightness toward the middle - looks like dimming lights
-    // rather than a hard cutoff as the segment shrinks.
-    int distToEdge = min(i - rangeStart, rangeEnd - i);
+    // rather than a hard cutoff as the segment shrinks. Once the range
+    // has collapsed down to a single pixel (rangeStart == rangeEnd),
+    // distToEdge is 0 on BOTH sides at once, which would otherwise fade
+    // that last pixel all the way to black right as the shrink finishes
+    // instead of leaving it lit - skip the edge fade in that case so it
+    // never visibly disappears.
     uint8_t brightness = 255;
-    if (distToEdge < STATE3_SHRINK_EDGE_FADE_PX) {
-      brightness = (uint8_t)(255.0 * distToEdge / STATE3_SHRINK_EDGE_FADE_PX);
+    if (rangeStart != rangeEnd) {
+      int distToEdge = min(i - rangeStart, rangeEnd - i);
+      if (distToEdge < STATE3_SHRINK_EDGE_FADE_PX) {
+        brightness = (uint8_t)(255.0 * distToEdge / STATE3_SHRINK_EDGE_FADE_PX);
+      }
     }
     CRGB c = STATE3_COLOR;
     c.nscale8(brightness);
@@ -216,12 +223,22 @@ float state3CometPos(unsigned long elapsedMs) {
 // (not just the head), so the whole comet has visibly arrived before the
 // glow bridges to the next pass. Doesn't launch until its own scheduled
 // moment on the fixed comet timeline (see STATE3_COMET1_START_MS/
-// STATE3_COMET_INTERVAL_MS) - stays dark until then. ----------
+// STATE3_COMET_INTERVAL_MS) - stays dark until then (EXCEPT the very
+// first pass - see below). ----------
 void doState3Comet() {
   if (!state3CometLaunched) {
     unsigned long phaseElapsed = millis() - state3CometPhaseStartTime;
     if (phaseElapsed < state3CometScheduledStart(state3ChunkRepeatIndex)) {
       FastLED.clear();
+      if (state3ChunkRepeatIndex == 0) {
+        // The first pass comes straight out of the shrink - keep its
+        // single lit pixel showing solid at STATE3_START_PIXEL instead
+        // of blanking it during this wait, so it never visibly
+        // disappears between the shrink finishing and the swing
+        // beginning. Passes 2-5 still go properly dark between
+        // scheduled launches, same as before.
+        leds[STATE3_START_PIXEL] = STATE3_COLOR;
+      }
       showThrottled();
       return; // waiting for this comet's scheduled start
     }

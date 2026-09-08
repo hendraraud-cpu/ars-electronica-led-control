@@ -1,13 +1,15 @@
 /*
   State 3 - opens with State 2's full 60-pixel segment lit, shrinking
   ("de-expanding") down into a single pixel at 66, then a comet that
-  moves exactly like State 1's (constant speed, fades in, tapered
-  trail, melts into its target point) instead of State 1's short
-  middle-segment comet - here it launches from pixel 66 and travels
-  all the way to the physical end of the strip, repeating 5 times,
-  then expand + breathing hold like State 1. Has its own cool blue-white
-  color (STATE3_COLOR), more blue than State 2's plain white - no longer
-  tied to STATE2_COLOR.
+  moves like State 1's (fades in, tapered trail, melts into its target
+  point) instead of State 1's short middle-segment comet - here it
+  launches from pixel 66, first swings DOWN 10 pixels (a quick wind-up,
+  STATE3_SWING_DOWN_PX/STATE3_SWING_MS) then heads forward all the way
+  to the physical end of the strip - still arriving there at exactly
+  the same moment as before the swing was added (STATE3_COMET_TRAVEL_MS,
+  1200ms after launch) - repeating 5 times, then expand + breathing hold
+  like State 1. Has its own cool blue-white color (STATE3_COLOR), more
+  blue than State 2's plain white - no longer tied to STATE2_COLOR.
   --------------------------------------------------------------------
   This tab is combined into the same program as led-pink.ino
   automatically (Arduino sketches merge every .ino file in the
@@ -35,7 +37,20 @@
 // STATE1_COMET_SPEED_PXPMS) - just covering the longer 66-to-end-of-strip
 // distance in less time, to keep State 3 feeling faster/punchier.
 #define STATE3_COMET_TRAVEL_MS  1200
-#define STATE3_COMET_SPEED_PXPMS  ((float)(STATE3_COMET_END - STATE3_START_PIXEL) / STATE3_COMET_TRAVEL_MS)
+
+// Before launching forward, the comet now winds up with a quick swing
+// DOWN by STATE3_SWING_DOWN_PX (10) pixels - the head still reaches
+// STATE3_COMET_END at exactly STATE3_COMET_TRAVEL_MS (1200ms) elapsed
+// from launch, same as before this was added, so the forward phase's
+// speed is recomputed to cover the extra distance (the 10px dip-back,
+// on top of the original 66->199 span) in whatever time is left over
+// after the dip. Dip duration not specified - picked a quick, snappy
+// wind-up.
+#define STATE3_SWING_DOWN_PX      10
+#define STATE3_SWING_MS          150
+#define STATE3_SWING_TARGET      (STATE3_START_PIXEL - STATE3_SWING_DOWN_PX)  // 56
+#define STATE3_FORWARD_MS        (STATE3_COMET_TRAVEL_MS - STATE3_SWING_MS)   // 1050ms
+#define STATE3_FORWARD_SPEED_PXPMS  ((float)(STATE3_COMET_END - STATE3_SWING_TARGET) / STATE3_FORWARD_MS)
 
 // Brief solid glow at the target point bridging one comet pass into the
 // next (same idea as State 1's doState1Glow(), just shorter since this
@@ -132,15 +147,15 @@ void doState3Shrink() {
 // ---------- Draws the comet's trail at a given (fractional) head
 // position - same shape as State 1's drawState1Comet(), just melting
 // into STATE3_COMET_END (the far end of the strip) instead of pixel 66,
-// and using STATE3_COLOR instead of PINK. The trail never shows behind
-// STATE3_START_PIXEL (66) - it launches from there, so it just grows
-// longer (up to the full trail length) as the head pulls away from it,
-// instead of a length of trail already existing behind the start point. ----------
+// and using STATE3_COLOR instead of PINK. Lower bound is
+// STATE3_SWING_TARGET (56), not STATE3_START_PIXEL (66) - the comet now
+// dips 10px below its launch point during the swing-down wind-up
+// before heading forward, so the trail needs room to show there too. ----------
 void drawState3Comet(float pos, uint8_t fadeInBrightness) {
   int headPos = (int)pos;
   for (int offset = 0; offset < STATE3_TRAIL_LENGTH; offset++) {
     int px = headPos - offset;
-    if (px < STATE3_START_PIXEL || px >= NUM_LEDS) continue;
+    if (px < STATE3_SWING_TARGET || px >= NUM_LEDS) continue;
 
     uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE3_TRAIL_LENGTH - 1));
 
@@ -160,13 +175,29 @@ void drawState3Comet(float pos, uint8_t fadeInBrightness) {
   }
 }
 
-// ---------- One comet pass, at constant speed, same motion as State 1's
-// comet - fades in, travels from STATE3_START_PIXEL to STATE3_COMET_END,
-// and melts into the target as its tail arrives (not just the head), so
-// the whole comet has visibly arrived before the glow bridges to the
-// next pass. Doesn't launch until its own scheduled moment on the fixed
-// comet timeline (see STATE3_COMET1_START_MS/STATE3_COMET_INTERVAL_MS) -
-// stays dark until then. ----------
+// ---------- Comet's head position at a given elapsed time since launch -
+// first swings DOWN from STATE3_START_PIXEL to STATE3_SWING_TARGET over
+// STATE3_SWING_MS (a quick wind-up), then heads forward from there to
+// STATE3_COMET_END (and beyond, uncapped, same as before - the tail
+// catching up is what ends the pass) at STATE3_FORWARD_SPEED_PXPMS,
+// timed so the head reaches STATE3_COMET_END at exactly
+// STATE3_COMET_TRAVEL_MS (1200ms) total elapsed, same as before the
+// swing was added. ----------
+float state3CometPos(unsigned long elapsedMs) {
+  if (elapsedMs < STATE3_SWING_MS) {
+    float t = (float)elapsedMs / STATE3_SWING_MS;
+    return STATE3_START_PIXEL - STATE3_SWING_DOWN_PX * t;
+  }
+  unsigned long forwardElapsed = elapsedMs - STATE3_SWING_MS;
+  return STATE3_SWING_TARGET + STATE3_FORWARD_SPEED_PXPMS * forwardElapsed;
+}
+
+// ---------- One comet pass - fades in, swings down then travels forward
+// (see state3CometPos()), and melts into the target as its tail arrives
+// (not just the head), so the whole comet has visibly arrived before the
+// glow bridges to the next pass. Doesn't launch until its own scheduled
+// moment on the fixed comet timeline (see STATE3_COMET1_START_MS/
+// STATE3_COMET_INTERVAL_MS) - stays dark until then. ----------
 void doState3Comet() {
   if (!state3CometLaunched) {
     unsigned long phaseElapsed = millis() - state3CometPhaseStartTime;
@@ -183,7 +214,7 @@ void doState3Comet() {
 
   FastLED.clear();
 
-  float pos = STATE3_START_PIXEL + STATE3_COMET_SPEED_PXPMS * absElapsed;
+  float pos = state3CometPos(absElapsed);
   float tailPos = pos - (STATE3_TRAIL_LENGTH - 1);
   if (tailPos < STATE3_COMET_END) {
     drawState3Comet(pos, state1CometFadeIn(absElapsed, true));

@@ -148,7 +148,36 @@ STATE_LOOP_FROM_SECONDS = {
     "state0": 5.0,
     "state1": 0.0,
     "state5_x": 3 + 14 / 30,  # 00:00:03:14 at 30fps
+    "state8": 20.0,  # 00:00:20
 }
+
+# States listed here loop a fixed WINDOW of their own audio forever,
+# instead of playing from STATE_LOOP_FROM_SECONDS through to the
+# track's true end like the states above - the file's content after
+# this timestamp never plays. State 8 plays from 0:00 the first time,
+# but only up to 00:02:10 - from then on it repeats the 00:00:20 -
+# 00:02:10 window forever (crossfading back to 00:00:20 each time it
+# hits 00:02:10, same as any other STATE_LOOP_FROM_SECONDS loop-back -
+# it's just not in STATE_LOOP_HARD_CUT, so that loop-back fades in).
+STATE_LOOP_WINDOW_END_SECONDS = {
+    "state8": 130.0,  # 00:02:10
+}
+
+
+def get_state_audio_path(state, first_play):
+    """Path to play for `state`'s audio - the raw file normally, or (for
+    states in STATE_LOOP_WINDOW_END_SECONDS) a clip trimmed to end at
+    that state's loop window instead of the file's true end, so it
+    naturally finishes there and the idle-loop-back below (driven by
+    STATE_LOOP_FROM_SECONDS) picks up the repeat. The very first play
+    still starts from 0:00; every loop after that starts from
+    STATE_LOOP_FROM_SECONDS[state]."""
+    audio_file = STATE_AUDIO[state]
+    if state in STATE_LOOP_WINDOW_END_SECONDS:
+        start_seconds = 0.0 if first_play else STATE_LOOP_FROM_SECONDS[state]
+        end_seconds = STATE_LOOP_WINDOW_END_SECONDS[state]
+        return get_loop_clip_path(audio_file, start_seconds, end_seconds)
+    return AUDIO_DIR + "\\" + audio_file
 
 # States listed here ALSO re-send their LED command at that same moment
 # they loop (see STATE_LOOP_FROM_SECONDS above).
@@ -157,9 +186,11 @@ STATES_THAT_RESEND_LED_ON_LOOP = {"state1"}
 # States listed here hand off to a DIFFERENT state once their audio
 # finishes (a one-time move forward, not a loop). State 3's track hands
 # off to State 4 once it ends - State 4 can also still be triggered
-# manually by pressing "4" at any other time.
+# manually by pressing "4" at any other time. State 7's track hands off
+# to State 8 the same way.
 STATE_ADVANCES_TO = {
     "state3": "state4",
+    "state7": "state8",
 }
 
 # What to send the 2nd Arduino (COM7) for each state - it only ever
@@ -247,19 +278,29 @@ def hard_cut_to(path):
 HARD_CUT_STATES = {"state2", "state3", "state4", "state5_x", "state5_z", "state6", "state7", "state8"}
 
 
-def get_loop_clip_path(audio_file, start_seconds):
+def get_loop_clip_path(audio_file, start_seconds, end_seconds=None):
     """Returns a cached copy of audio_file trimmed to start at start_seconds
-    in, creating it with ffmpeg the first time it's needed."""
+    in (and, if given, cut off at end_seconds instead of playing through to
+    the file's true end), creating it with ffmpeg the first time it's
+    needed."""
     os.makedirs(LOOP_CACHE_DIR, exist_ok=True)
     name, ext = os.path.splitext(audio_file)
-    cached_path = os.path.join(LOOP_CACHE_DIR, f"{name}_from{int(start_seconds)}s{ext}")
+    suffix = f"_from{int(start_seconds)}s"
+    if end_seconds is not None:
+        suffix += f"_to{int(end_seconds)}s"
+    cached_path = os.path.join(LOOP_CACHE_DIR, f"{name}{suffix}{ext}")
 
     if not os.path.exists(cached_path):
         source_path = os.path.join(AUDIO_DIR, audio_file)
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        print(f"   (building loop clip from {start_seconds}s in - one-time step)")
+        end_note = f" to {end_seconds}s" if end_seconds is not None else ""
+        print(f"   (building loop clip from {start_seconds}s{end_note} - one-time step)")
+        cmd = [ffmpeg_exe, "-y", "-i", source_path, "-ss", str(start_seconds)]
+        if end_seconds is not None:
+            cmd += ["-to", str(end_seconds)]
+        cmd += ["-c", "copy", cached_path]
         subprocess.run(
-            [ffmpeg_exe, "-y", "-i", source_path, "-ss", str(start_seconds), "-c", "copy", cached_path],
+            cmd,
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -323,7 +364,7 @@ def trigger(state, arduino, arduino2, arduino3):
 
     audio_file = STATE_AUDIO.get(state)
     if audio_file:
-        path = AUDIO_DIR + "\\" + audio_file
+        path = get_state_audio_path(state, first_play=True)
         if state in HARD_CUT_STATES:
             print(f"   cutting abruptly to {audio_file}")
             hard_cut_to(path)

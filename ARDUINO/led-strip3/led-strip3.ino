@@ -45,11 +45,11 @@
                       to a single point at its own middle (73)
                     00:00:00:15 - 00:00:00:25 (833ms) - that point moves
                       30 pixels down, to pixel 43
-                    00:00:00:25 - 00:00:01:27 (1900ms) - continues
-                      moving down the remaining distance to the
-                      physical end of the strip (pixel 0)
+                    00:00:00:25 - 00:00:01:27 (1900ms) - now a small
+                      comet (5px trail) moving UP to pixel 120, the
+                      physical end of the strip
                   Holds there (a single breathing white point at pixel
-                  0) once it arrives. If state7 arrives at any other
+                  120) once it arrives. If state7 arrives at any other
                   time, it just blanks the strip like every other
                   unhandled command.
   Any other command just blanks this strip.
@@ -128,15 +128,17 @@
 //       point at its own middle (CENTER_PIXEL, 73)
 //   00:00:00:15 - 00:00:00:25 (500-833ms): that point moves
 //       STATE7_MOVE1_PX (30) pixels down, to pixel 43
-//   00:00:00:25 - 00:00:01:27 (833-1900ms): continues moving down the
-//       remaining distance to the physical end of the strip (pixel 0)
-// Holds there (a single point at pixel 0) once it arrives.
+//   00:00:00:25 - 00:00:01:27 (833-1900ms): now a small comet (5px
+//       trail) moving UP to pixel 120 - the physical end of the strip
+// Holds there (a single point at pixel 120) once it arrives.
 #define STATE7_SHRINK_MS      500  // 00:00:00:15
 #define STATE7_MOVE1_END_MS   833  // 00:00:00:25
 #define STATE7_MOVE1_PX        30
 #define STATE7_MOVE1_MS       (STATE7_MOVE1_END_MS - STATE7_SHRINK_MS)
 #define STATE7_MOVE1_TARGET   (CENTER_PIXEL - STATE7_MOVE1_PX)  // 43
 #define STATE7_MOVE2_END_MS  1900  // 00:00:01:27
+#define STATE7_MOVE2_TARGET   120  // physical end of the strip
+#define STATE7_TRAIL_LENGTH     5
 #define STATE7_MOVE2_MS       (STATE7_MOVE2_END_MS - STATE7_MOVE1_END_MS)
 
 CRGB leds[NUM_LEDS];
@@ -492,30 +494,41 @@ void doState7Move1() {
   }
 }
 
-// ---------- The point continues down from STATE7_MOVE1_TARGET (43) to
-// the physical end of the strip (pixel 0), over STATE7_MOVE2_MS ----------
+// ---------- Now a small comet (STATE7_TRAIL_LENGTH, 5px trail) moving
+// UP from STATE7_MOVE1_TARGET (43) to STATE7_MOVE2_TARGET (120, the
+// physical end of the strip), over STATE7_MOVE2_MS. Trail trails behind
+// in the direction of travel (lower pixels), same convention as this
+// file's other comets. ----------
 void doState7Move2() {
   unsigned long elapsed = millis() - stageStartTime;
   float t = (float)elapsed / STATE7_MOVE2_MS;
   if (t > 1.0) t = 1.0;
 
-  int pos = STATE7_MOVE1_TARGET - (int)(STATE7_MOVE1_TARGET * t);
+  int headPos = STATE7_MOVE1_TARGET + (int)((STATE7_MOVE2_TARGET - STATE7_MOVE1_TARGET) * t);
 
   uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
-  CRGB c = STATE6_COLOR;
-  c.nscale8(breath);
 
   FastLED.clear();
-  leds[pos] = c;
+  for (int offset = 0; offset < STATE7_TRAIL_LENGTH; offset++) {
+    int px = headPos - offset;
+    if (px < STATE7_MOVE1_TARGET || px > STATE7_MOVE2_TARGET) continue;
+
+    uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE7_TRAIL_LENGTH - 1));
+
+    CRGB c = STATE6_COLOR;
+    c.nscale8(breath);
+    c.nscale8(tailFade);
+    leds[px] = c;
+  }
   FastLED.show();
 
   if (t >= 1.0) {
     stage = STAGE3_STATE7_HOLD;
-    Serial.println(F("State 7 (strip 3): holding at pixel 0..."));
+    Serial.println(F("State 7 (strip 3): holding at pixel 120..."));
   }
 }
 
-// ---------- Settled at the physical end of the strip (pixel 0) - a
+// ---------- Settled at the physical end of the strip (pixel 120) - a
 // single breathing white point, forever until the next command ----------
 void doState7Hold() {
   uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
@@ -523,7 +536,7 @@ void doState7Hold() {
   c.nscale8(breath);
 
   FastLED.clear();
-  leds[0] = c;
+  leds[STATE7_MOVE2_TARGET] = c;
   FastLED.show();
 }
 

@@ -12,19 +12,21 @@
   see checkSerialCommand() and goToState() below, that's the one
   place to change when the real trigger exists.
 
-  STATE 1 has 4 sections, named a/b/c/d, matching fixed timestamps in the
+  STATE 1 has 3 sections, named a/b/c, matching fixed timestamps in the
   43-second audio track (STATE1_SECTION_START_MS, all measured from the
   "state1" trigger = the track starting):
-    a = 0ms (0:00)      b = 12000ms (0:12)
-    c = 21000ms (0:21)  d = 30000ms (0:30)
+    a = 0ms (0:00)  b = 00:00:11:20 (11667ms)  c = 21000ms (0:21, LAST)
   Each section plays the SAME comet+glow+expand sequence below, from its
-  own start. Sections a, b, and c get cut off 1.5s before the NEXT
-  section starts (STATE1_SECTION_FADE_MS) - regardless of which part of
-  the sequence they've reached at that moment - fading whatever's
-  currently lit to black over that 1.5s, then the next section starts
-  fresh exactly on its timestamp. Section d has no section after it, so
-  it just plays out its own natural sequence (including its own fadeout
-  below) and then holds dark - matching the end of the 43s track.
+  own start. Sections a and b get cut off 1.5s before the NEXT section
+  starts (STATE1_SECTION_FADE_MS) - regardless of which part of the
+  sequence they've reached at that moment - fading whatever's currently
+  lit to black over that 1.5s, then the next section starts fresh
+  exactly on its timestamp. Section c has no section after it, so it
+  just plays out its own natural sequence, then HOLDS its expand
+  (doesn't fade) - solid at first, breathing from STATE1_BREATHE_START_MS
+  onward - until STATE1_HOLD_FADEOUT_START_MS, when it finally fades to
+  black (its own duration, STATE1_HOLD_FADEOUT_MS) and holds dark,
+  matching the end of the 43s track.
 
   ONE SECTION'S SEQUENCE (timestamps relative to ITS OWN start):
     0ms                    - nothing shown yet (STATE1_START_DELAY_MS
@@ -43,11 +45,12 @@
     -> pixel 66 glows solid for STATE1_GLOW_MS (300ms), then the segment
        expands from that same pixel outward, both ways, fast-then-slow,
        over STATE1_EXPAND_MS (1900ms)
-    fully expanded (section d only) - fades the whole segment to black
-                             over STATE1_FADEOUT_MS (2300ms), then holds
-                             dark and WAITS for the next "state1" trigger
-                             (live_control.py re-sends it when the whole
-                             43s track finishes and loops)
+    fully expanded (section c only) - holds/breathes (see doState1Hold()),
+                             then eventually fades the whole segment to
+                             black over STATE1_HOLD_FADEOUT_MS (4500ms),
+                             then holds dark and WAITS for the next
+                             "state1" trigger (live_control.py re-sends
+                             it when the whole 43s track finishes and loops)
 
   PIXEL MAPPING (12.5mm per pixel)
   -----------------------------------
@@ -98,8 +101,13 @@
 #define STATE1_EXPAND_SHORTEN_PX     6  // max reach is 6px short of the full segment, each side
 #define STATE1_EXPAND_EDGE_FADE_PX   6  // soft fade at the growing edges (not specified
                                          // exactly - matched the 6px used elsewhere)
-#define STATE1_FADEOUT_MS         3500  // fade to black at the very end - slowed down from
-                                         // 2300ms now that it sparkles as it fades
+#define STATE1_FADEOUT_MS         3500  // used by doState1FadeOut() only (sections a/b's rare
+                                         // natural-completion edge case, see below) - slowed
+                                         // down from 2300ms now that it sparkles as it fades
+#define STATE1_HOLD_FADEOUT_MS    4500  // doState1HoldFadeOut()'s own duration - the TRUE final
+                                         // fade to black after section c's (the last section's)
+                                         // hold ends. 1s longer than STATE1_FADEOUT_MS, decoupled
+                                         // so that change doesn't also affect the a/b case above.
 #define STATE1_COMET_FADE_IN_MS    400  // at the very start (time-based)
 // Keeps moving/drawing until its WHOLE trail (tail included, not just
 // the head) has passed pixel 66 - that's what actually fixes the
@@ -564,11 +572,12 @@ void doState1Hold() {
   }
 }
 
-// ---------- Shared by doState1HoldFadeOut() and doState1FadeOut() - fades
-// the fully-expanded segment to black over STATE1_FADEOUT_MS, sparkling
-// as it goes (same random-override overlay as the comet's trail, so
-// glints of light pop up here and there as it dies out instead of a
-// plain, even dim-down). Returns true once the fade has fully completed. ----------
+// ---------- Shared rendering by doState1HoldFadeOut() and doState1FadeOut()
+// (each supplies its own duration via t) - fades the fully-expanded
+// segment to black, sparkling as it goes (same random-override overlay
+// as the comet's trail, so glints of light pop up here and there as it
+// dies out instead of a plain, even dim-down). Returns true once the
+// fade has fully completed. ----------
 bool renderState1SparkleFadeOut(float t) {
   uint8_t fadeBrightness = (uint8_t)(255.0 * (1.0 - t));
 
@@ -603,7 +612,7 @@ bool renderState1SparkleFadeOut(float t) {
 // holds dark waiting for the next trigger/loop. ----------
 void doState1HoldFadeOut() {
   unsigned long elapsed = millis() - state1StageStartTime;
-  float t = (float)elapsed / STATE1_FADEOUT_MS;
+  float t = (float)elapsed / STATE1_HOLD_FADEOUT_MS;
   if (t > 1.0) t = 1.0;
 
   if (renderState1SparkleFadeOut(t)) {

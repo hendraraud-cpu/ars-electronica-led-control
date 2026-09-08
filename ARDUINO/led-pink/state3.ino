@@ -7,9 +7,14 @@
   DOWN 10 pixels (a quick wind-up, STATE3_SWING_DOWN_PX/STATE3_SWING_MS)
   before heading forward; the other 4 travel straight - all the way to
   the physical end of the strip, still arriving there at exactly the
-  same moment either way (STATE3_COMET_TRAVEL_MS, 1200ms after launch),
-  then expand + breathing hold like State 1. Has its own cool blue-white
-  color (STATE3_COLOR), more blue than State 2's plain white - no longer
+  same moment either way (STATE3_COMET_TRAVEL_MS, 1200ms after launch).
+  Every pass's trail grows from a single pixel up to its full length as
+  the head pulls away from wherever it launched (continuously across
+  the swing-into-forward turn for pass 1 - see
+  state3CometPathDistance()), rather than showing full-length
+  immediately. Then expand + breathing hold like State 1. Has its own
+  cool blue-white color (STATE3_COLOR), more blue than State 2's plain
+  white - no longer
   tied to STATE2_COLOR.
   --------------------------------------------------------------------
   This tab is combined into the same program as led-pink.ino
@@ -163,17 +168,22 @@ void doState3Shrink() {
 // trail sits on: while swinging DOWN (decreasing pixels), the trail
 // trails BEHIND at higher pixels (it's moving down, so behind = above);
 // once heading forward (increasing pixels), the trail sits behind at
-// lower pixels, same as always - so it's a real trailing comet in both
-// directions instead of a fixed-direction shape that looks backwards
-// during the dip. No melt-into-target fade while swinging (that only
+// lower pixels, same as always. `visibleLength` is how many of the
+// STATE3_TRAIL_LENGTH pixels are actually drawn right now - passed in
+// smaller than the full length while the comet is still "growing" (see
+// state3CometPathDistance()) - the FADE CURVE itself is still computed
+// against the full STATE3_TRAIL_LENGTH regardless, so a short trail
+// looks like just the bright head-end of the full comet being
+// progressively revealed, not a differently-scaled fade squeezed into
+// fewer pixels. No melt-into-target fade while swinging (that only
 // makes sense approaching STATE3_COMET_END, which the swing isn't
 // anywhere near). ----------
-void drawState3Comet(float pos, uint8_t fadeInBrightness, bool swinging) {
+void drawState3Comet(float pos, uint8_t fadeInBrightness, bool swinging, int visibleLength) {
   int headPos = (int)pos;
   int trailStep = swinging ? 1 : -1;
-  for (int offset = 0; offset < STATE3_TRAIL_LENGTH; offset++) {
+  for (int offset = 0; offset < visibleLength; offset++) {
     int px = headPos + trailStep * offset;
-    if (px < STATE3_SWING_TARGET || px >= NUM_LEDS) continue;
+    if (px < 0 || px >= NUM_LEDS) continue;
 
     uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE3_TRAIL_LENGTH - 1));
 
@@ -218,6 +228,29 @@ float state3CometPos(unsigned long elapsedMs) {
   return STATE3_SWING_TARGET + STATE3_FORWARD_SPEED_PXPMS * forwardElapsed;
 }
 
+// ---------- Total path distance the HEAD has travelled since launch,
+// regardless of direction (swing-down counts the same as forward) -
+// used to grow the visible trail from a single pixel up to the full
+// STATE3_TRAIL_LENGTH (30) as the head pulls away from wherever it
+// started, same "grows from origin" idea this sketch has always used
+// for its comets, just continuous across the swing-then-forward turn
+// instead of resetting at the pivot (which would otherwise make the
+// trail visibly SHRINK back down at that instant, right after briefly
+// showing full-length during the swing). Once distance reaches
+// STATE3_TRAIL_LENGTH-1 pixels, the comet's fully "grown" and stays
+// that way for the rest of the pass. ----------
+float state3CometPathDistance(unsigned long elapsedMs) {
+  if (state3ChunkRepeatIndex > 0) {
+    return STATE3_COMET_SPEED_PXPMS * elapsedMs;
+  }
+  if (elapsedMs < STATE3_SWING_MS) {
+    float t = (float)elapsedMs / STATE3_SWING_MS;
+    return STATE3_SWING_DOWN_PX * t;
+  }
+  unsigned long forwardElapsed = elapsedMs - STATE3_SWING_MS;
+  return STATE3_SWING_DOWN_PX + STATE3_FORWARD_SPEED_PXPMS * forwardElapsed;
+}
+
 // ---------- One comet pass - fades in, swings down then travels forward
 // (see state3CometPos()), and melts into the target as its tail arrives
 // (not just the head), so the whole comet has visibly arrived before the
@@ -252,9 +285,12 @@ void doState3Comet() {
 
   bool swinging = (state3ChunkRepeatIndex == 0 && absElapsed < STATE3_SWING_MS);
   float pos = state3CometPos(absElapsed);
+  int visibleLength = (int)state3CometPathDistance(absElapsed) + 1;
+  if (visibleLength > STATE3_TRAIL_LENGTH) visibleLength = STATE3_TRAIL_LENGTH;
+  if (visibleLength < 1) visibleLength = 1;
   float tailPos = pos - (STATE3_TRAIL_LENGTH - 1);
   if (tailPos < STATE3_COMET_END) {
-    drawState3Comet(pos, state1CometFadeIn(absElapsed, true), swinging);
+    drawState3Comet(pos, state1CometFadeIn(absElapsed, true), swinging, visibleLength);
     showThrottled();
   } else {
     state3StageStartTime = millis();

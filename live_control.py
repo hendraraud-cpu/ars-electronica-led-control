@@ -176,13 +176,15 @@ ARDUINO2_COMMAND = {
 
 # What to send the 3rd Arduino (COM9) for each state - it reacts to
 # State 5 mode Z (comet + expand + breathing hold), State 5 mode X
-# (repeating comet, mirroring COM7 mode X's), and State 6 (only does
-# anything if it's currently mid-state5z-hold - see led-strip3.ino);
-# anything else blanks its strip.
+# (repeating comet, mirroring COM7 mode X's), State 6 (only does
+# anything if it's currently mid-state5z-hold or mid-state5x), and
+# State 7 (only does anything if it's currently mid-state6-hold) - see
+# led-strip3.ino for the exact conditions; anything else blanks its strip.
 ARDUINO3_COMMAND = {
     "state5_z": "state5z",
     "state5_x": "state5x",
     "state6": "state6",
+    "state7": "state7",
 }
 
 # Cache folder for the trimmed "starts partway in" versions used by the

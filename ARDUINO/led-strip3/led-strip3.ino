@@ -37,6 +37,21 @@
                   Either way it then holds there breathing white
                   forever. If state6 arrives at any other time, it just
                   blanks the strip like every other unhandled command.
+    "state7"  - sent when State 7 is triggered, but only does anything
+                  if this strip is currently mid-state6-hold
+                  (STAGE3_STATE6_HOLD - state6's settled white section).
+                  All timing measured from state7's own trigger, t=0:
+                    0 - 00:00:00:15 (500ms) - that section shrinks down
+                      to a single point at its own middle (73)
+                    00:00:00:15 - 00:00:00:25 (833ms) - that point moves
+                      30 pixels down, to pixel 43
+                    00:00:00:25 - 00:00:01:27 (1900ms) - continues
+                      moving down the remaining distance to the
+                      physical end of the strip (pixel 0)
+                  Holds there (a single breathing white point at pixel
+                  0) once it arrives. If state7 arrives at any other
+                  time, it just blanks the strip like every other
+                  unhandled command.
   Any other command just blanks this strip.
 
   NUM_LEDS is a placeholder (190) - hasn't been confirmed against the
@@ -106,6 +121,24 @@
 // shrink.
 #define STATE6_EXPAND_MS  400
 
+// "state7" - only reachable from STAGE3_STATE6_HOLD (continues from
+// state6's own held white section). All timing measured from state7's
+// own trigger, t=0:
+//   0 - 00:00:00:15 (500ms): that section shrinks down to a single
+//       point at its own middle (CENTER_PIXEL, 73)
+//   00:00:00:15 - 00:00:00:25 (500-833ms): that point moves
+//       STATE7_MOVE1_PX (30) pixels down, to pixel 43
+//   00:00:00:25 - 00:00:01:27 (833-1900ms): continues moving down the
+//       remaining distance to the physical end of the strip (pixel 0)
+// Holds there (a single point at pixel 0) once it arrives.
+#define STATE7_SHRINK_MS      500  // 00:00:00:15
+#define STATE7_MOVE1_END_MS   833  // 00:00:00:25
+#define STATE7_MOVE1_PX        30
+#define STATE7_MOVE1_MS       (STATE7_MOVE1_END_MS - STATE7_SHRINK_MS)
+#define STATE7_MOVE1_TARGET   (CENTER_PIXEL - STATE7_MOVE1_PX)  // 43
+#define STATE7_MOVE2_END_MS  1900  // 00:00:01:27
+#define STATE7_MOVE2_MS       (STATE7_MOVE2_END_MS - STATE7_MOVE1_END_MS)
+
 CRGB leds[NUM_LEDS];
 CRGB STRIP3_COLOR = CRGB::Red;
 CRGB STATE6_COLOR = CRGB::White;
@@ -113,7 +146,8 @@ CRGB STATE6_COLOR = CRGB::White;
 enum Stage3 {
   STAGE3_IDLE, STAGE3_WAIT, STAGE3_COMET, STAGE3_EXPAND, STAGE3_HOLD,
   STAGE3_X_WAIT, STAGE3_X_COMET, STAGE3_X_GLOW,
-  STAGE3_STATE6_SHRINK, STAGE3_STATE6_EXPAND, STAGE3_STATE6_HOLD
+  STAGE3_STATE6_SHRINK, STAGE3_STATE6_EXPAND, STAGE3_STATE6_HOLD,
+  STAGE3_STATE7_SHRINK, STAGE3_STATE7_MOVE1, STAGE3_STATE7_MOVE2, STAGE3_STATE7_HOLD
 };
 Stage3 stage = STAGE3_IDLE;
 
@@ -146,10 +180,14 @@ void loop() {
     case STAGE3_STATE6_SHRINK: doState6Shrink(); break;
     case STAGE3_STATE6_EXPAND: doState6Expand(); break;
     case STAGE3_STATE6_HOLD:   doState6Hold(); break;
+    case STAGE3_STATE7_SHRINK: doState7Shrink(); break;
+    case STAGE3_STATE7_MOVE1:  doState7Move1(); break;
+    case STAGE3_STATE7_MOVE2:  doState7Move2(); break;
+    case STAGE3_STATE7_HOLD:   doState7Hold(); break;
   }
 }
 
-// ---------- Read "state5z" / "state5x" / "state6" / anything else from Serial and react ----------
+// ---------- Read "state5z" / "state5x" / "state6" / "state7" / anything else from Serial and react ----------
 void checkSerialCommand() {
   while (Serial.available() > 0) {
     char c = Serial.read();
@@ -165,6 +203,8 @@ void checkSerialCommand() {
         } else if (strcmp(cmdBuffer, "state6") == 0 &&
                    (stage == STAGE3_X_WAIT || stage == STAGE3_X_COMET || stage == STAGE3_X_GLOW)) {
           startState6ExpandFromMidpoint();
+        } else if (strcmp(cmdBuffer, "state7") == 0 && stage == STAGE3_STATE6_HOLD) {
+          startState7();
         } else {
           goDark();
         }
@@ -388,6 +428,102 @@ void doState6Hold() {
   for (int i = STATE6_TARGET_START; i <= STATE6_TARGET_END; i++) {
     leds[i] = c;
   }
+  FastLED.show();
+}
+
+// ---------- "state7", only reachable from STAGE3_STATE6_HOLD - shrinks
+// that same white section down to a single point at its own middle
+// (CENTER_PIXEL) over STATE7_SHRINK_MS ----------
+void startState7() {
+  stageStartTime = millis();
+  stage = STAGE3_STATE7_SHRINK;
+  Serial.println(F("State 7 (strip 3): shrinking to midpoint..."));
+}
+
+void doState7Shrink() {
+  unsigned long elapsed = millis() - stageStartTime;
+  float t = (float)elapsed / STATE7_SHRINK_MS;
+  if (t > 1.0) t = 1.0;
+
+  int currentHalfLow  = (int)((CENTER_PIXEL - STATE6_TARGET_START) * (1.0 - t));
+  int currentHalfHigh = (int)((STATE6_TARGET_END - CENTER_PIXEL) * (1.0 - t));
+  int rangeStart = CENTER_PIXEL - currentHalfLow;
+  int rangeEnd   = CENTER_PIXEL + currentHalfHigh;
+
+  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
+  CRGB c = STATE6_COLOR;
+  c.nscale8(breath);
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    leds[i] = c;
+  }
+  FastLED.show();
+
+  if (t >= 1.0) {
+    stageStartTime = millis();
+    stage = STAGE3_STATE7_MOVE1;
+    Serial.println(F("State 7 (strip 3): moving down 30px..."));
+  }
+}
+
+// ---------- The melted-down point moves STATE7_MOVE1_PX (30) pixels
+// down, from CENTER_PIXEL to STATE7_MOVE1_TARGET (43), over
+// STATE7_MOVE1_MS ----------
+void doState7Move1() {
+  unsigned long elapsed = millis() - stageStartTime;
+  float t = (float)elapsed / STATE7_MOVE1_MS;
+  if (t > 1.0) t = 1.0;
+
+  int pos = CENTER_PIXEL - (int)(STATE7_MOVE1_PX * t);
+
+  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
+  CRGB c = STATE6_COLOR;
+  c.nscale8(breath);
+
+  FastLED.clear();
+  leds[pos] = c;
+  FastLED.show();
+
+  if (t >= 1.0) {
+    stageStartTime = millis();
+    stage = STAGE3_STATE7_MOVE2;
+    Serial.println(F("State 7 (strip 3): moving to end of strip..."));
+  }
+}
+
+// ---------- The point continues down from STATE7_MOVE1_TARGET (43) to
+// the physical end of the strip (pixel 0), over STATE7_MOVE2_MS ----------
+void doState7Move2() {
+  unsigned long elapsed = millis() - stageStartTime;
+  float t = (float)elapsed / STATE7_MOVE2_MS;
+  if (t > 1.0) t = 1.0;
+
+  int pos = STATE7_MOVE1_TARGET - (int)(STATE7_MOVE1_TARGET * t);
+
+  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
+  CRGB c = STATE6_COLOR;
+  c.nscale8(breath);
+
+  FastLED.clear();
+  leds[pos] = c;
+  FastLED.show();
+
+  if (t >= 1.0) {
+    stage = STAGE3_STATE7_HOLD;
+    Serial.println(F("State 7 (strip 3): holding at pixel 0..."));
+  }
+}
+
+// ---------- Settled at the physical end of the strip (pixel 0) - a
+// single breathing white point, forever until the next command ----------
+void doState7Hold() {
+  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
+  CRGB c = STATE6_COLOR;
+  c.nscale8(breath);
+
+  FastLED.clear();
+  leds[0] = c;
   FastLED.show();
 }
 

@@ -3,13 +3,14 @@
   ("de-expanding") down into a single pixel at 66, then a comet that
   moves like State 1's (fades in, tapered trail, melts into its target
   point) instead of State 1's short middle-segment comet - here it
-  launches from pixel 66, first swings DOWN 10 pixels (a quick wind-up,
-  STATE3_SWING_DOWN_PX/STATE3_SWING_MS) then heads forward all the way
-  to the physical end of the strip - still arriving there at exactly
-  the same moment as before the swing was added (STATE3_COMET_TRAVEL_MS,
-  1200ms after launch) - repeating 5 times, then expand + breathing hold
-  like State 1. Has its own cool blue-white color (STATE3_COLOR), more
-  blue than State 2's plain white - no longer tied to STATE2_COLOR.
+  launches from pixel 66 - only the FIRST of the 5 passes first swings
+  DOWN 10 pixels (a quick wind-up, STATE3_SWING_DOWN_PX/STATE3_SWING_MS)
+  before heading forward; the other 4 travel straight - all the way to
+  the physical end of the strip, still arriving there at exactly the
+  same moment either way (STATE3_COMET_TRAVEL_MS, 1200ms after launch),
+  then expand + breathing hold like State 1. Has its own cool blue-white
+  color (STATE3_COLOR), more blue than State 2's plain white - no longer
+  tied to STATE2_COLOR.
   --------------------------------------------------------------------
   This tab is combined into the same program as led-pink.ino
   automatically (Arduino sketches merge every .ino file in the
@@ -35,17 +36,21 @@
 
 // Constant-speed comet, same motion shape as State 1's (see
 // STATE1_COMET_SPEED_PXPMS) - just covering the longer 66-to-end-of-strip
-// distance in less time, to keep State 3 feeling faster/punchier.
+// distance in less time, to keep State 3 feeling faster/punchier. Used
+// by every pass except the first (see state3CometPos()).
 #define STATE3_COMET_TRAVEL_MS  1200
+#define STATE3_COMET_SPEED_PXPMS  ((float)(STATE3_COMET_END - STATE3_START_PIXEL) / STATE3_COMET_TRAVEL_MS)
 
-// Before launching forward, the comet now winds up with a quick swing
-// DOWN by STATE3_SWING_DOWN_PX (10) pixels - the head still reaches
-// STATE3_COMET_END at exactly STATE3_COMET_TRAVEL_MS (1200ms) elapsed
-// from launch, same as before this was added, so the forward phase's
-// speed is recomputed to cover the extra distance (the 10px dip-back,
-// on top of the original 66->199 span) in whatever time is left over
-// after the dip. Dip duration not specified - picked a quick, snappy
-// wind-up.
+// ONLY the very first comet pass (coming straight out of the shrink)
+// winds up with a quick swing DOWN by STATE3_SWING_DOWN_PX (10) pixels
+// before launching forward - passes 2-5 travel straight, no swing (see
+// state3CometPos()) - same idea as State 7 on COM9 moving right out of
+// its own shrink-to-a-point. The head still reaches STATE3_COMET_END at
+// exactly STATE3_COMET_TRAVEL_MS (1200ms) elapsed from launch, same as
+// before this was added, so the forward phase's speed is recomputed to
+// cover the extra distance (the 10px dip-back, on top of the original
+// 66->199 span) in whatever time is left over after the dip. Dip
+// duration not specified - picked a quick, snappy wind-up.
 #define STATE3_SWING_DOWN_PX      10
 #define STATE3_SWING_MS          150
 #define STATE3_SWING_TARGET      (STATE3_START_PIXEL - STATE3_SWING_DOWN_PX)  // 56
@@ -175,15 +180,21 @@ void drawState3Comet(float pos, uint8_t fadeInBrightness) {
   }
 }
 
-// ---------- Comet's head position at a given elapsed time since launch -
-// first swings DOWN from STATE3_START_PIXEL to STATE3_SWING_TARGET over
-// STATE3_SWING_MS (a quick wind-up), then heads forward from there to
-// STATE3_COMET_END (and beyond, uncapped, same as before - the tail
-// catching up is what ends the pass) at STATE3_FORWARD_SPEED_PXPMS,
-// timed so the head reaches STATE3_COMET_END at exactly
-// STATE3_COMET_TRAVEL_MS (1200ms) total elapsed, same as before the
-// swing was added. ----------
+// ---------- Comet's head position at a given elapsed time since launch.
+// ONLY the first pass (state3ChunkRepeatIndex == 0) swings - straight
+// out of the shrink, same idea as State 7 on COM9 moving right out of
+// its own shrink-to-a-point - first DOWN from STATE3_START_PIXEL to
+// STATE3_SWING_TARGET over STATE3_SWING_MS (a quick wind-up), then
+// forward from there to STATE3_COMET_END (and beyond, uncapped, same as
+// before - the tail catching up is what ends the pass) at
+// STATE3_FORWARD_SPEED_PXPMS, timed so the head reaches STATE3_COMET_END
+// at exactly STATE3_COMET_TRAVEL_MS (1200ms) total elapsed, same as
+// before the swing was added. Every other pass just travels straight at
+// the original constant speed (STATE3_COMET_SPEED_PXPMS), no swing. ----------
 float state3CometPos(unsigned long elapsedMs) {
+  if (state3ChunkRepeatIndex > 0) {
+    return STATE3_START_PIXEL + STATE3_COMET_SPEED_PXPMS * elapsedMs;
+  }
   if (elapsedMs < STATE3_SWING_MS) {
     float t = (float)elapsedMs / STATE3_SWING_MS;
     return STATE3_START_PIXEL - STATE3_SWING_DOWN_PX * t;

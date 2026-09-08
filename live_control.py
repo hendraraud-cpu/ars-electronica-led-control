@@ -59,11 +59,25 @@ keypresses, no need to press Enter:
                   slowly. The main strip (COM8) is untouched.
     6 -> State 6 (audio cut abruptly to
                   850133__cat-fox_alex__sub-pitch-down-sub-3.wav - a bass
-                  drop). Audio only - no LED behavior defined yet.
-    7 -> State 7 (audio cut abruptly to 07_STATION 3.MP3). Audio only for
-                  now - no LED behavior defined yet.
-    8 -> State 8 (audio cut abruptly to 08_REVEALING CHAMBER.mp3). Audio
-                  only for now - no LED behavior defined yet.
+                  drop). The 3rd strip (COM9) reacts only if it's
+                  currently mid-state5z-hold or mid-state5x: either way
+                  it lands on the same white, 3px-narrower section (see
+                  led-strip3.ino) and holds there breathing. COM7/COM8
+                  untouched.
+    7 -> State 7 (audio cut abruptly to 07_STATION 3.MP3). Once this
+                  track ends, State 8 starts automatically (no key
+                  needed) - see STATE_ADVANCES_TO. The 3rd strip (COM9)
+                  reacts only if it's currently mid-state6-hold: shrinks
+                  to a point at its midpoint, moves 30px down, then a
+                  small comet carries it up to pixel 120 (the physical
+                  end of the strip) where it holds. COM7/COM8 untouched.
+    8 -> State 8 (audio cut abruptly to 08_REVEALING CHAMBER.mp3, or
+                  triggered automatically when State 7's track ends).
+                  Plays from 0:00 the first time, but only up to
+                  00:02:10 - from then on it loops the 00:00:20-00:02:10
+                  window forever, crossfading back to 00:00:20 each time
+                  it hits 00:02:10 (see STATE_LOOP_WINDOW_END_SECONDS).
+                  No LED behavior defined yet.
     b -> DEBUG/TEST ONLY, not a real state. Jumps COM7 ahead so
                   expansion2 begins ~11.7 seconds after this is pressed
                   (instead of the ~11s wait after the normal breathe
@@ -450,7 +464,8 @@ def main():
 
                 audio_file = STATE_AUDIO[current_state]
                 start_seconds = STATE_LOOP_FROM_SECONDS[current_state]
-                loop_path = get_loop_clip_path(audio_file, start_seconds)
+                end_seconds = STATE_LOOP_WINDOW_END_SECONDS.get(current_state)
+                loop_path = get_loop_clip_path(audio_file, start_seconds, end_seconds)
                 if current_state in STATE_LOOP_HARD_CUT:
                     print(f"   cutting abruptly back to {audio_file} (from {start_seconds}s)")
                     hard_cut_to(loop_path)
@@ -470,7 +485,7 @@ def main():
                 and not current_channel.get_busy()
             ):
                 next_state = STATE_ADVANCES_TO[current_state]
-                path = AUDIO_DIR + "\\" + STATE_AUDIO[next_state]
+                path = get_state_audio_path(next_state, first_play=True)
                 print(f"\n>> {current_state} audio finished - advancing to {next_state}")
 
                 # Same cancellation as in trigger(): State 4 doesn't touch

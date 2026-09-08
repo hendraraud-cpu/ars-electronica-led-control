@@ -48,11 +48,13 @@
                     00:00:00:25 - 00:00:01:27 (1900ms) - now a comet (a
                       solid 5px head plus a 5px fading trail), eased -
                       accelerates/decelerates rather than constant speed
-                      - moving UP to pixel 135
-                  Holds there (a single breathing white point at pixel
-                  135) once it arrives. If state7 arrives at any other
-                  time, it just blanks the strip like every other
-                  unhandled command.
+                      - moving UP to pixel 139. Over the last second of
+                      this move, it smoothly transitions color from
+                      white to bright green.
+                  Holds there (a single point at pixel 139), glowing
+                  green, breathing slowly, once it arrives. If state7
+                  arrives at any other time, it just blanks the strip
+                  like every other unhandled command.
   Any other command just blanks this strip.
 
   NUM_LEDS is a placeholder (190) - hasn't been confirmed against the
@@ -132,22 +134,27 @@
 //   00:00:00:25 - 00:00:01:27 (833-1900ms): now a comet - a solid 5px
 //       head plus a 5px fading trail behind it - accelerates/decelerates
 //       (eased, same easeInOutCubicFast() shape as state5z's comet, not
-//       constant speed) moving UP to pixel 135
-// Holds there (a single point at pixel 135) once it arrives.
+//       constant speed) moving UP to pixel 139. Over the LAST second of
+//       this move, it smoothly transitions color from white to bright
+//       green.
+// Holds there (a single point at pixel 139), glowing green, breathing
+// slowly, once it arrives.
 #define STATE7_SHRINK_MS      500  // 00:00:00:15
 #define STATE7_MOVE1_END_MS   833  // 00:00:00:25
 #define STATE7_MOVE1_PX        30
 #define STATE7_MOVE1_MS       (STATE7_MOVE1_END_MS - STATE7_SHRINK_MS)
 #define STATE7_MOVE1_TARGET   (CENTER_PIXEL - STATE7_MOVE1_PX)  // 43
 #define STATE7_MOVE2_END_MS  1900  // 00:00:01:27
-#define STATE7_MOVE2_TARGET   135  // 15px further than pixel 120
+#define STATE7_MOVE2_TARGET   139  // 4px further than pixel 135
 #define STATE7_COMET_LENGTH     5  // solid head block, full brightness
 #define STATE7_TRAIL_LENGTH     5  // fading tail appended behind the head
 #define STATE7_MOVE2_MS       (STATE7_MOVE2_END_MS - STATE7_MOVE1_END_MS)
+#define STATE7_COLOR_TRANSITION_MS  1000  // white->green over the last second of the move
 
 CRGB leds[NUM_LEDS];
 CRGB STRIP3_COLOR = CRGB::Red;
 CRGB STATE6_COLOR = CRGB::White;
+CRGB STATE7_GREEN_COLOR = CRGB(0, 255, 0);  // bright green, full saturation
 
 enum Stage3 {
   STAGE3_IDLE, STAGE3_WAIT, STAGE3_COMET, STAGE3_EXPAND, STAGE3_HOLD,
@@ -502,9 +509,11 @@ void doState7Move1() {
 // STATE7_TRAIL_LENGTH (5px) fading tail behind it - eased (accelerates
 // then decelerates, same easeInOutCubicFast() shape as state5z's own
 // comet, not constant speed) from STATE7_MOVE1_TARGET (43) up to
-// STATE7_MOVE2_TARGET (135), over STATE7_MOVE2_MS. Trail trails behind
+// STATE7_MOVE2_TARGET (139), over STATE7_MOVE2_MS. Trail trails behind
 // in the direction of travel (lower pixels), same convention as this
-// file's other comets. ----------
+// file's other comets. Over the LAST STATE7_COLOR_TRANSITION_MS (1s) of
+// this move, its color smoothly blends from white to bright green -
+// purely time-based, independent of the eased position. ----------
 void doState7Move2() {
   unsigned long elapsed = millis() - stageStartTime;
   float t = (float)elapsed / STATE7_MOVE2_MS;
@@ -512,6 +521,17 @@ void doState7Move2() {
 
   float eased = easeInOutCubicFast(t);
   int headFront = STATE7_MOVE1_TARGET + (int)((STATE7_MOVE2_TARGET - STATE7_MOVE1_TARGET) * eased);
+
+  unsigned long transitionStart = (STATE7_MOVE2_MS > STATE7_COLOR_TRANSITION_MS)
+      ? (STATE7_MOVE2_MS - STATE7_COLOR_TRANSITION_MS) : 0;
+  CRGB baseColor;
+  if (elapsed <= transitionStart) {
+    baseColor = STATE6_COLOR;
+  } else {
+    float colorT = (float)(elapsed - transitionStart) / STATE7_COLOR_TRANSITION_MS;
+    if (colorT > 1.0) colorT = 1.0;
+    baseColor = blend(STATE6_COLOR, STATE7_GREEN_COLOR, (uint8_t)(colorT * 255));
+  }
 
   uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
 
@@ -521,7 +541,7 @@ void doState7Move2() {
   for (int offset = 0; offset < STATE7_COMET_LENGTH; offset++) {
     int px = headFront - offset;
     if (px < STATE7_MOVE1_TARGET || px > STATE7_MOVE2_TARGET) continue;
-    CRGB c = STATE6_COLOR;
+    CRGB c = baseColor;
     c.nscale8(breath);
     leds[px] = c;
   }
@@ -531,7 +551,7 @@ void doState7Move2() {
     int px = headFront - STATE7_COMET_LENGTH - offset;
     if (px < STATE7_MOVE1_TARGET || px > STATE7_MOVE2_TARGET) continue;
     uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE7_TRAIL_LENGTH - 1));
-    CRGB c = STATE6_COLOR;
+    CRGB c = baseColor;
     c.nscale8(breath);
     c.nscale8(tailFade);
     leds[px] = c;
@@ -541,15 +561,15 @@ void doState7Move2() {
 
   if (t >= 1.0) {
     stage = STAGE3_STATE7_HOLD;
-    Serial.println(F("State 7 (strip 3): holding at pixel 135..."));
+    Serial.println(F("State 7 (strip 3): holding at pixel 139, glowing green..."));
   }
 }
 
-// ---------- Settled at pixel 135 - a single breathing white point,
-// forever until the next command ----------
+// ---------- Settled at pixel 139 - a single breathing bright green
+// point, glowing slowly, forever until the next command ----------
 void doState7Hold() {
   uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
-  CRGB c = STATE6_COLOR;
+  CRGB c = STATE7_GREEN_COLOR;
   c.nscale8(breath);
 
   FastLED.clear();

@@ -61,7 +61,17 @@
 
   TIMELINE for "state3" (from this board's own trigger, t=0) - shifted
   2634ms earlier across the board to match the updated State 3 soundtrack:
-    0 - 00:00:09:22 (9733ms)    - dark
+    00:00:02:18 (2600ms)        - pre-expansion1 comets start: 5 passes,
+                                   same schedule/speed/trail as COM8's
+                                   own state3 comets, launching from
+                                   SEGMENT_END (250) and converging
+                                   inward to CENTER_PIXEL (160) - see
+                                   EXPANSION1_COMET_* below. NOTE: as
+                                   currently scheduled these can still
+                                   be running past 00:00:09:22/00:00:11:01
+                                   below - see the comment on
+                                   EXPANSION1_COMET_REPEATS.
+    0 - 00:00:09:22 (9733ms)    - dark (aside from the comets above)
     00:00:09:22                 - single center pixel starts breathing
     00:00:11:01 - 00:00:12:01   - expands from that center point to the
                                    whole strip over 1 second, breathing
@@ -97,6 +107,39 @@
 #define NUM_LEDS       (SEGMENT_END + 1)
 
 #define CENTER_PIXEL  160  // fixed midpoint for expansion (expansion1) - reverted, the 25px-forward move was undone
+
+// Pre-expansion1 comets - mirrors State 3's own comets on COM8
+// (state3.ino) exactly: same repeat count (5), same schedule interval
+// (2067ms), same trail length (30), same fade-out width (4px), same
+// glow bridge between passes (100ms). Runs here from the strip's OTHER
+// end (SEGMENT_END, 250) converging INWARD to expansion1's own center
+// (CENTER_PIXEL, 160) instead of diverging outward from a point. Speed
+// is matched to COM8's own comet speed (66->199 over 1200ms = 133px/
+// 1200ms), not its duration, since the distance here (90px) is shorter -
+// same motion feel, naturally quicker to cover less ground.
+#define EXPANSION1_COMET_START_MS       2600  // phase starts here - the exact moment COM8's own
+                                                // first state3 comet lands at the end of ITS strip
+#define EXPANSION1_COMET1_START_MS       400  // first comet launches this long after the phase starts
+#define EXPANSION1_COMET_INTERVAL_MS    2067
+#define EXPANSION1_COMET_REPEATS           5
+#define EXPANSION1_COMET_TRAIL_LENGTH      30
+#define EXPANSION1_COMET_FADE_OUT_PX        4
+#define EXPANSION1_COMET_FADE_IN_MS       400
+#define EXPANSION1_COMET_GLOW_MS          100
+#define EXPANSION1_COMET_SPEED_PXPMS  (133.0 / 1200.0)  // = COM8 state3's own comet speed
+// FLAGGED, not resolved: at this schedule (phase start 2600ms + 400ms +
+// 4*2067ms interval = comet 5 launches at 11268ms, lands ~811ms later
+// around 12080ms + 100ms glow), the comets finish around 00:00:12:18 -
+// AFTER both BREATHE_START_MS (00:00:09:22) and EXPAND_START_MS
+// (00:00:11:01) below. Since this stage only hands off to
+// STAGE2_DARK_WAIT once all 5 passes finish, doBreathePoint()/doExpand()
+// won't even get evaluated until then - their own elapsed-time checks
+// will find themselves already past due and skip straight through,
+// compressing/skipping the breathe-then-expand look rather than the
+// comets cleanly finishing "before expansion1" as intended. Left as-is
+// pending a decision - either push BREATHE_START_MS/EXPAND_START_MS/
+// etc. ~2.5s later to give all 5 passes room, or trim the comet count/
+// interval to fit the current ~7.1s window (2600-9733ms).
 
 // Timeline constants (ms since this board's own "state3" trigger).
 #define BREATHE_START_MS  9733  // 00:00:09:22
@@ -236,7 +279,9 @@ CRGB STRIP2_COLOR = CRGB::White; // station2 (State 4) and state5x's glitch phas
 CRGB STATE3_COLOR = CRGB(150, 180, 255);
 
 enum Stage2 {
-  STAGE2_IDLE, STAGE2_DARK_WAIT, STAGE2_BREATHE_POINT, STAGE2_EXPAND, STAGE2_HOLD,
+  STAGE2_IDLE,
+  STAGE2_EXPANSION1_COMET_WAIT, STAGE2_EXPANSION1_COMET, STAGE2_EXPANSION1_COMET_GLOW,
+  STAGE2_DARK_WAIT, STAGE2_BREATHE_POINT, STAGE2_EXPAND, STAGE2_HOLD,
   STAGE2_SHRINK2, STAGE2_HOLD2,
   STAGE2_STATION2_FLICKER, STAGE2_STATION2_HOLD,
   STAGE2_STATE5X_GLITCH, STAGE2_STATE5X_SHRINK, STAGE2_STATE5X_COMET, STAGE2_STATE5X_GLOW,
@@ -245,6 +290,10 @@ enum Stage2 {
 Stage2 stage = STAGE2_IDLE;
 
 unsigned long triggerTime = 0;
+unsigned long expansion1CometPhaseStartTime = 0; // t=0 for the pre-expansion1 comets' own schedule
+unsigned long expansion1CometStageStartTime = 0; // t=0 for the CURRENT comet's travel
+int expansion1CometRepeatIndex = 0;
+bool expansion1CometLaunched = false; // true once the CURRENT comet's travel has begun
 unsigned long shrink2StartTime = 0;
 unsigned long station2StartTime = 0;
 int station2FlickerIndex = 0;
@@ -278,6 +327,9 @@ void loop() {
 
   switch (stage) {
     case STAGE2_IDLE:         break; // nothing triggered yet - stay dark
+    case STAGE2_EXPANSION1_COMET_WAIT: doExpansion1CometWait(); break;
+    case STAGE2_EXPANSION1_COMET:      doExpansion1Comet(); break;
+    case STAGE2_EXPANSION1_COMET_GLOW: doExpansion1CometGlow(); break;
     case STAGE2_DARK_WAIT:    doDarkWait(); break;
     case STAGE2_BREATHE_POINT: doBreathePoint(); break;
     case STAGE2_EXPAND:       doExpand(); break;
@@ -340,8 +392,115 @@ void startState3() {
   FastLED.clear();
   FastLED.show();
   triggerTime = millis();
-  stage = STAGE2_DARK_WAIT;
+  stage = STAGE2_EXPANSION1_COMET_WAIT;
   Serial.println(F("State 3 (strip 2): waiting..."));
+}
+
+// ---------- Dark until EXPANSION1_COMET_START_MS (2600ms) ----------
+void doExpansion1CometWait() {
+  if (millis() - triggerTime >= EXPANSION1_COMET_START_MS) {
+    expansion1CometPhaseStartTime = millis();
+    expansion1CometRepeatIndex = 0;
+    expansion1CometLaunched = false;
+    stage = STAGE2_EXPANSION1_COMET;
+    Serial.println(F("State 3 (strip 2): pre-expansion1 comets starting..."));
+  }
+}
+
+// ---------- The scheduled start time (ms since the comet phase began) for the Nth comet ----------
+unsigned long expansion1CometScheduledStart(int index) {
+  return EXPANSION1_COMET1_START_MS + (unsigned long)index * EXPANSION1_COMET_INTERVAL_MS;
+}
+
+// ---------- Fade-in only (each comet's own start, time-based) - same
+// shape as COM8's state1CometFadeIn() ----------
+uint8_t expansion1CometFadeIn(unsigned long elapsedSinceStart) {
+  if (elapsedSinceStart < EXPANSION1_COMET_FADE_IN_MS) {
+    return (uint8_t)(255.0 * elapsedSinceStart / EXPANSION1_COMET_FADE_IN_MS);
+  }
+  return 255;
+}
+
+// ---------- Draws the comet's trail at a given (fractional) head
+// position - mirrors COM8's drawState3Comet(), just travelling the
+// opposite direction (decreasing pixels, so the trail sits AHEAD in
+// index terms, toward SEGMENT_END) and melting into CENTER_PIXEL
+// instead of the far end. ----------
+void drawExpansion1Comet(float pos, uint8_t fadeInBrightness) {
+  int headPos = (int)pos;
+  for (int offset = 0; offset < EXPANSION1_COMET_TRAIL_LENGTH; offset++) {
+    int px = headPos + offset;
+    if (px > SEGMENT_END || px < CENTER_PIXEL) continue;
+
+    uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (EXPANSION1_COMET_TRAIL_LENGTH - 1));
+
+    uint8_t endFade = 255;
+    int distToEnd = px - CENTER_PIXEL;
+    if (distToEnd <= EXPANSION1_COMET_FADE_OUT_PX) {
+      float frac = (float)distToEnd / EXPANSION1_COMET_FADE_OUT_PX;
+      if (frac < 0) frac = 0;
+      endFade = (uint8_t)(255.0 * frac);
+    }
+
+    CRGB c = STATE3_COLOR;
+    c.nscale8(fadeInBrightness);
+    c.nscale8(tailFade);
+    c.nscale8(endFade);
+    leds[px] = c;
+  }
+}
+
+// ---------- One comet pass, at constant speed (matching COM8's own
+// comet speed), from SEGMENT_END down to CENTER_PIXEL - mirrors COM8's
+// doState3Comet(), waiting for its own scheduled launch first. ----------
+void doExpansion1Comet() {
+  if (!expansion1CometLaunched) {
+    unsigned long phaseElapsed = millis() - expansion1CometPhaseStartTime;
+    if (phaseElapsed < expansion1CometScheduledStart(expansion1CometRepeatIndex)) {
+      FastLED.clear();
+      FastLED.show();
+      return; // waiting for this comet's scheduled start
+    }
+    expansion1CometLaunched = true;
+    expansion1CometStageStartTime = millis();
+  }
+
+  unsigned long absElapsed = millis() - expansion1CometStageStartTime;
+  FastLED.clear();
+
+  float pos = SEGMENT_END - EXPANSION1_COMET_SPEED_PXPMS * absElapsed;
+  float tailPos = pos + (EXPANSION1_COMET_TRAIL_LENGTH - 1);
+  if (tailPos > CENTER_PIXEL) {
+    drawExpansion1Comet(pos, expansion1CometFadeIn(absElapsed));
+    FastLED.show();
+  } else {
+    expansion1CometStageStartTime = millis();
+    expansion1CometLaunched = false; // reset - gates the NEXT comet's scheduled wait
+    stage = STAGE2_EXPANSION1_COMET_GLOW;
+  }
+}
+
+// ---------- Brief solid glow at CENTER_PIXEL, bridging one comet pass
+// into the next (or into the existing dark-wait-for-breathe, on the
+// last pass) - mirrors COM8's doState3Glow(). ----------
+void doExpansion1CometGlow() {
+  FastLED.clear();
+  leds[CENTER_PIXEL] = STATE3_COLOR;
+  FastLED.show();
+
+  if (millis() - expansion1CometStageStartTime >= EXPANSION1_COMET_GLOW_MS) {
+    expansion1CometRepeatIndex++;
+
+    if (expansion1CometRepeatIndex >= EXPANSION1_COMET_REPEATS) {
+      stage = STAGE2_DARK_WAIT;
+      Serial.println(F("State 3 (strip 2): pre-expansion1 comets done - waiting..."));
+    } else {
+      expansion1CometStageStartTime = millis();
+      stage = STAGE2_EXPANSION1_COMET;
+      Serial.print(F("State 3 (strip 2): pre-expansion1 comet pass "));
+      Serial.println(expansion1CometRepeatIndex + 1);
+    }
+  }
 }
 
 // Debug/test only ("b" command) - how many ms after pressing "b"

@@ -51,10 +51,11 @@
                       - moving UP to pixel 139. Over the last second of
                       this move, it smoothly transitions color from
                       white to bright green.
-                  Holds there (a single point at pixel 139), glowing
-                  green, breathing slowly, once it arrives. If state7
-                  arrives at any other time, it just blanks the strip
-                  like every other unhandled command.
+                  Once it lands, the last two pixels (138, 139) blink
+                  green like a turn signal - one, then the other, back
+                  and forth, forever. If state7 arrives at any other
+                  time, it just blanks the strip like every other
+                  unhandled command.
   Any other command just blanks this strip.
 
   NUM_LEDS is a placeholder (190) - hasn't been confirmed against the
@@ -150,6 +151,12 @@
 #define STATE7_TRAIL_LENGTH     5  // fading tail appended behind the head
 #define STATE7_MOVE2_MS       (STATE7_MOVE2_END_MS - STATE7_MOVE1_END_MS)
 #define STATE7_COLOR_TRANSITION_MS  1000  // white->green over the last second of the move
+// Once it lands, the last two pixels blink like a turn signal (one,
+// then the other) instead of holding still. Interval not specified -
+// picked a simple, readable blinker cadence.
+#define STATE7_BLINK_MS         400
+#define STATE7_BLINK_PIXEL_A   (STATE7_MOVE2_TARGET - 1)  // 138
+#define STATE7_BLINK_PIXEL_B   (STATE7_MOVE2_TARGET)      // 139
 
 CRGB leds[NUM_LEDS];
 CRGB STRIP3_COLOR = CRGB::Red;
@@ -565,15 +572,15 @@ void doState7Move2() {
   }
 }
 
-// ---------- Settled at pixel 139 - a single breathing bright green
-// point, glowing slowly, forever until the next command ----------
+// ---------- Settled at the last two pixels (138, 139) - blinks between
+// them like a turn signal, one then the other (not both at once, and
+// not breathing/fading - a sharp on/off blinker), forever until the
+// next command ----------
 void doState7Hold() {
-  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
-  CRGB c = STATE7_GREEN_COLOR;
-  c.nscale8(breath);
+  bool showA = ((millis() / STATE7_BLINK_MS) % 2) == 0;
 
   FastLED.clear();
-  leds[STATE7_MOVE2_TARGET] = c;
+  leds[showA ? STATE7_BLINK_PIXEL_A : STATE7_BLINK_PIXEL_B] = STATE7_GREEN_COLOR;
   FastLED.show();
 }
 

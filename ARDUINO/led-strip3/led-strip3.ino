@@ -56,6 +56,9 @@
                   and forth, forever. If state7 arrives at any other
                   time, it just blanks the strip like every other
                   unhandled command.
+    "state8"  - deliberate no-op - this strip has no behavior of its
+                  own for State 8, so whatever's already running (e.g.
+                  state7's green blinker) just keeps going undisturbed.
   Any other command just blanks this strip.
 
   NUM_LEDS is a placeholder (190) - hasn't been confirmed against the
@@ -225,6 +228,10 @@ void checkSerialCommand() {
           startState6ExpandFromMidpoint();
         } else if (strcmp(cmdBuffer, "state7") == 0 && stage == STAGE3_STATE6_HOLD) {
           startState7();
+        } else if (strcmp(cmdBuffer, "state8") == 0) {
+          // Deliberate no-op - state8 has no LED behavior of its own,
+          // so whatever's currently running (e.g. state7's green
+          // blinker) just keeps going undisturbed instead of blanking.
         } else {
           goDark();
         }

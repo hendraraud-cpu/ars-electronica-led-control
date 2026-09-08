@@ -77,7 +77,10 @@ keypresses, no need to press Enter:
                   00:02:10 - from then on it loops the 00:00:20-00:02:10
                   window forever, crossfading back to 00:00:20 each time
                   it hits 00:02:10 (see STATE_LOOP_WINDOW_END_SECONDS).
-                  No LED behavior defined yet.
+                  No LED behavior of its own - the 3rd strip (COM9) is
+                  deliberately left undisturbed, so if State 7 landed it
+                  on the green blinker, that just keeps blinking through
+                  State 8. COM7/COM8 untouched too.
     b -> DEBUG/TEST ONLY, not a real state. Jumps COM7 ahead so
                   expansion2 begins ~11.7 seconds after this is pressed
                   (instead of the ~11s wait after the normal breathe
@@ -222,14 +225,17 @@ ARDUINO2_COMMAND = {
 # What to send the 3rd Arduino (COM9) for each state - it reacts to
 # State 5 mode Z (comet + expand + breathing hold), State 5 mode X
 # (repeating comet, mirroring COM7 mode X's), State 6 (only does
-# anything if it's currently mid-state5z-hold or mid-state5x), and
-# State 7 (only does anything if it's currently mid-state6-hold) - see
-# led-strip3.ino for the exact conditions; anything else blanks its strip.
+# anything if it's currently mid-state5z-hold or mid-state5x), State 7
+# (only does anything if it's currently mid-state6-hold), and State 8
+# (a deliberate no-op - keeps whatever's currently running, e.g. State
+# 7's green blinker, going undisturbed) - see led-strip3.ino for the
+# exact conditions; anything else blanks its strip.
 ARDUINO3_COMMAND = {
     "state5_z": "state5z",
     "state5_x": "state5x",
     "state6": "state6",
     "state7": "state7",
+    "state8": "state8",
 }
 
 # Cache folder for the trimmed "starts partway in" versions used by the

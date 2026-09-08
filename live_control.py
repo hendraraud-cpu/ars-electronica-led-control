@@ -57,6 +57,9 @@ keypresses, no need to press Enter:
                   reacts - from 6 seconds in, it holds a solid 60px red
                   section (centered on its own pixel 100), breathing
                   slowly. The main strip (COM8) is untouched.
+    6 -> State 6 (audio cut abruptly to
+                  850133__cat-fox_alex__sub-pitch-down-sub-3.wav - a bass
+                  drop). Audio only - no LED behavior defined yet.
     7 -> State 7 (audio cut abruptly to 07_STATION 3.MP3). Audio only for
                   now - no LED behavior defined yet.
     8 -> State 8 (audio cut abruptly to 08_REVEALING CHAMBER.mp3). Audio
@@ -130,6 +133,7 @@ STATE_AUDIO = {
     "state4": "05_STATION 2 (1).MP3",
     "state5_x": "05_x STATION2.MP3",  # State 5, mode X
     "state5_z": "05_z STATION2.MP3",  # State 5, mode Z
+    "state6": "850133__cat-fox_alex__sub-pitch-down-sub-3.wav",
     "state7": "07_STATION 3.MP3",
     "state8": "08_REVEALING CHAMBER.mp3",
 }
@@ -189,6 +193,7 @@ KEY_TO_STATE = {
     "2": "state2",
     "3": "state3",
     "4": "state4",
+    "6": "state6",
     "x": "state5_x",
     "z": "state5_z",
     "7": "state7",
@@ -235,7 +240,7 @@ def hard_cut_to(path):
 
 
 # States listed here cut abruptly (no fade) instead of crossfading.
-HARD_CUT_STATES = {"state2", "state3", "state4", "state5_x", "state5_z", "state7", "state8"}
+HARD_CUT_STATES = {"state2", "state3", "state4", "state5_x", "state5_z", "state6", "state7", "state8"}
 
 
 def get_loop_clip_path(audio_file, start_seconds):

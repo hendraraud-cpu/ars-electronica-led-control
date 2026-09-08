@@ -22,6 +22,14 @@
                     (0.48 px/ms), with a brief 7px-wide glow (3px each
                     side of the midpoint) between passes, same rhythm as
                     the comets landing
+    "state6"  - sent when State 6 (the bass drop) is triggered, but only
+                  does anything if this strip is currently mid-state5z-
+                  hold (STAGE3_HOLD - the settled red breathing section):
+                  quickly (STATE6_SHRINK_MS) turns white and shrinks the
+                  60px section in by STATE6_SHRINK_PX (3) pixels on each
+                  side, then holds there breathing white forever. If
+                  state6 arrives at any other time, it just blanks the
+                  strip like every other unhandled command.
   Any other command just blanks this strip.
 
   NUM_LEDS is a placeholder (190) - hasn't been confirmed against the
@@ -29,6 +37,16 @@
   7 wasn't responding, still needs confirming that 5 actually works).
 */
 
+// Without this, FastLED.show() briefly disables interrupts on every
+// call (needed for WS2812's strict bit timing) - while doHold() is
+// calling it every loop iteration, an incoming Serial command byte can
+// land in that window and get corrupted (confirmed by testing: "state6"
+// arriving as "stte6" or "st" while the state5z hold was running,
+// failing to match and blanking the strip instead of triggering the
+// shrink). This lets FastLED keep interrupts enabled and retry any bit
+// an interrupt disrupts instead, trading a vanishingly small chance of
+// a single pixel glitch for Serial actually being received reliably.
+#define FASTLED_ALLOW_INTERRUPTS 1
 #include <FastLED.h>
 #include <string.h>
 
@@ -66,12 +84,23 @@
 #define XCOMET_FADE_OUT_PX       4
 #define XCOMET_GLOW_MS          80  // same as COM7 mode X's landing glow
 
+// "state6" (bass drop) - only acts if triggered while mid-state5z-hold:
+// shrinks the same 60px section 3px in on each side and switches it to
+// white. Duration not specified - picked a quick, snappy transition to
+// land with a bass hit rather than an eased crawl.
+#define STATE6_SHRINK_PX    3
+#define STATE6_SHRINK_MS  300
+#define STATE6_TARGET_START  (SEGMENT_START + STATE6_SHRINK_PX)
+#define STATE6_TARGET_END    (SEGMENT_END - STATE6_SHRINK_PX)
+
 CRGB leds[NUM_LEDS];
 CRGB STRIP3_COLOR = CRGB::Red;
+CRGB STATE6_COLOR = CRGB::White;
 
 enum Stage3 {
   STAGE3_IDLE, STAGE3_WAIT, STAGE3_COMET, STAGE3_EXPAND, STAGE3_HOLD,
-  STAGE3_X_WAIT, STAGE3_X_COMET, STAGE3_X_GLOW
+  STAGE3_X_WAIT, STAGE3_X_COMET, STAGE3_X_GLOW,
+  STAGE3_STATE6_SHRINK, STAGE3_STATE6_HOLD
 };
 Stage3 stage = STAGE3_IDLE;
 
@@ -101,10 +130,12 @@ void loop() {
     case STAGE3_X_WAIT:  doXWait(); break;
     case STAGE3_X_COMET: doXComet(); break;
     case STAGE3_X_GLOW:  doXGlow(); break;
+    case STAGE3_STATE6_SHRINK: doState6Shrink(); break;
+    case STAGE3_STATE6_HOLD:   doState6Hold(); break;
   }
 }
 
-// ---------- Read "state5z" / "state5x" / anything else from Serial and react ----------
+// ---------- Read "state5z" / "state5x" / "state6" / anything else from Serial and react ----------
 void checkSerialCommand() {
   while (Serial.available() > 0) {
     char c = Serial.read();
@@ -115,6 +146,8 @@ void checkSerialCommand() {
           startState5z();
         } else if (strcmp(cmdBuffer, "state5x") == 0) {
           startState5x();
+        } else if (strcmp(cmdBuffer, "state6") == 0 && stage == STAGE3_HOLD) {
+          startState6Shrink();
         } else {
           goDark();
         }
@@ -250,6 +283,53 @@ void doHold() {
 
   FastLED.clear();
   for (int i = SEGMENT_START; i <= SEGMENT_END; i++) {
+    leds[i] = c;
+  }
+  FastLED.show();
+}
+
+// ---------- "state6" (bass drop), only reachable from STAGE3_HOLD -
+// quickly shrinks the same 60px section 3px in on each side and turns
+// it white, over STATE6_SHRINK_MS ----------
+void startState6Shrink() {
+  stageStartTime = millis();
+  stage = STAGE3_STATE6_SHRINK;
+  Serial.println(F("State 6 (strip 3): bass drop - shrinking to white..."));
+}
+
+void doState6Shrink() {
+  unsigned long elapsed = millis() - stageStartTime;
+  float t = (float)elapsed / STATE6_SHRINK_MS;
+  if (t > 1.0) t = 1.0;
+
+  int rangeStart = SEGMENT_START + (int)(STATE6_SHRINK_PX * t);
+  int rangeEnd = SEGMENT_END - (int)(STATE6_SHRINK_PX * t);
+
+  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
+  CRGB c = STATE6_COLOR;
+  c.nscale8(breath);
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    leds[i] = c;
+  }
+  FastLED.show();
+
+  if (t >= 1.0) {
+    stage = STAGE3_STATE6_HOLD;
+    Serial.println(F("State 6 (strip 3): holding white, shrunk 3px each side..."));
+  }
+}
+
+// ---------- Settled after the state6 shrink - same 60px section minus
+// 3px each side, solid white, breathing, forever until the next command ----------
+void doState6Hold() {
+  uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
+  CRGB c = STATE6_COLOR;
+  c.nscale8(breath);
+
+  FastLED.clear();
+  for (int i = STATE6_TARGET_START; i <= STATE6_TARGET_END; i++) {
     leds[i] = c;
   }
   FastLED.show();

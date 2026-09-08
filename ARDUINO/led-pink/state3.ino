@@ -67,13 +67,21 @@
 // repeats 7 times and needs to stay snappy).
 #define STATE3_GLOW_MS  100
 
-// Each comet launches on a fixed schedule, measured from the moment the
+// Comets 2-5 launch on a fixed schedule, measured from the moment the
 // comet sequence begins (right after the shrink completes) - not back-
-// to-back. Comet 1 starts at 00:00:00:12 (400ms) and comet 2 at
-// 00:00:02:14 (2467ms); that ~2067ms gap is then reused as the interval
-// between every comet after, all 6 evenly spaced. If a pass's travel +
-// glow (1300ms) finishes before the next scheduled start, the strip
-// just goes dark and waits.
+// to-back. Comet 2 launches at 00:00:02:14 (2467ms); that interval
+// (minus comet 1's old 400ms head start, now removed - see doState3Comet())
+// is reused as the ~2067ms gap between every comet after. If a pass's
+// travel + glow (1300ms) finishes before the next scheduled start, the
+// strip just goes dark and waits. Comet 1 no longer follows this
+// schedule at all - it launches at t=0 (the instant the shrink
+// completes), since the swing is a continuation of the shrink's own
+// point rather than a separate comet appearing later - see
+// doState3Comet(). NOTE: this moved comet 1's arrival at the physical
+// end of the strip from 00:00:02:18 (2600ms) to 00:00:02:06 (2200ms)
+// from the "state3" trigger - COM7's pre-expansion1 comets
+// (EXPANSION1_COMET_START_MS in led-strip2.ino) are still synced to the
+// OLD 2600ms value and haven't been updated to match.
 #define STATE3_COMET1_START_MS    400
 #define STATE3_COMET_INTERVAL_MS  2067
 
@@ -256,22 +264,17 @@ float state3CometPathDistance(unsigned long elapsedMs) {
 // (not just the head), so the whole comet has visibly arrived before the
 // glow bridges to the next pass. Doesn't launch until its own scheduled
 // moment on the fixed comet timeline (see STATE3_COMET1_START_MS/
-// STATE3_COMET_INTERVAL_MS) - stays dark until then (EXCEPT the very
-// first pass - see below). ----------
+// STATE3_COMET_INTERVAL_MS) - stays dark until then. EXCEPT the very
+// first pass: it launches immediately (the swing begins the instant the
+// shrink finishes, no wait), since it's the shrink's own point
+// continuing straight into motion rather than a separate comet showing
+// up later. ----------
 void doState3Comet() {
   if (!state3CometLaunched) {
     unsigned long phaseElapsed = millis() - state3CometPhaseStartTime;
-    if (phaseElapsed < state3CometScheduledStart(state3ChunkRepeatIndex)) {
+    unsigned long scheduledStart = (state3ChunkRepeatIndex == 0) ? 0 : state3CometScheduledStart(state3ChunkRepeatIndex);
+    if (phaseElapsed < scheduledStart) {
       FastLED.clear();
-      if (state3ChunkRepeatIndex == 0) {
-        // The first pass comes straight out of the shrink - keep its
-        // single lit pixel showing solid at STATE3_START_PIXEL instead
-        // of blanking it during this wait, so it never visibly
-        // disappears between the shrink finishing and the swing
-        // beginning. Passes 2-5 still go properly dark between
-        // scheduled launches, same as before.
-        leds[STATE3_START_PIXEL] = STATE3_COLOR;
-      }
       showThrottled();
       return; // waiting for this comet's scheduled start
     }

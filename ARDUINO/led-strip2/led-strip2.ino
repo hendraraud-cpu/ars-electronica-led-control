@@ -9,9 +9,37 @@
                  2's on the main board) with the same slow breathing
                  idle hold - no flicker yet, that can be layered in
                  once there's a specific timeline for it.
-    "state5"   - both modes of State 5 (x and z) send this. Lights up
-                 the SAME 60-pixel section as expansion2's final core
-                 (same position and length), solid, no animation.
+    "state5"   - State 5 mode Z sends this. A scripted sequence on the
+                 SAME 60-pixel section as expansion2's final core
+                 (110-169, centered on 140):
+                   0 - 00:00:01:06 (1200ms) - glitch flickers that get
+                       FASTER each time (shrinking interval), not dimmer
+                   00:00:01:06 - 00:00:03:05 (1967ms) - the 60px section
+                       swings left/right by 30px around its center
+                   00:00:03:05 - a comet launches right at this moment
+                       (no separate shrink stage) from the midpoint (140)
+                       and races to pixel 0 ONCE (no repeat, eased in-out,
+                       melted in by 00:00:05:25), then holds dark
+    "state5x"  - State 5 mode X sends this. A scripted sequence over the
+                 WHOLE physical strip (pixels 0-SEGMENT_END, not just the
+                 20-cut active segment State 3 uses):
+                   0 - 700ms - glitch flickers, each one dimmer than the
+                       last, fading toward black
+                   700ms - 00:00:01:21 (1000ms, a full second) - instant
+                       red flash across the whole strip, then shrinks
+                       down to a single point at STATE5X_CENTER_PIXEL
+                       (144, its own midpoint - separate from
+                       EXPANSION2_CENTER_PIXEL) - this last second of the
+                       whole lead-in is red throughout
+                   00:00:01:21 onward - fast red comets repeat forever,
+                       launching from pixel 144 and racing down to pixel
+                       0 (reversed direction from every other comet in
+                       this project), with a brief landing glow between
+                       each pass
+    "b"        - DEBUG/TEST ONLY (not a real state) - jumps straight
+                 ahead so expansion2 begins 4 seconds after this is
+                 pressed (STATE3_TEST_B_LEAD_MS), instead of waiting
+                 through the ~12.4s dark lead-in + full hold every time.
   Any other command ("state0"/"state1"/"state2") just blanks this strip.
 
   The active/lit section for "state3" starts at pixel 0 (SEGMENT_START) -
@@ -25,27 +53,29 @@
 
   "station2"'s own 60-pixel section is at pixels 110-169 - moved back 8
   then down 2 more from 120-179, no longer exactly matching expansion2's
-  core or State 5's section (both still at 120-179) - a separate, narrower range
-  within the same address space. Expansion1 is centered on CENTER_PIXEL
-  (160); expansion2 has its own, separate center (EXPANSION2_CENTER_PIXEL,
-  150) - 10 pixels back from
-  expansion1's.
+  core or State 5 mode Z's section - a separate, narrower range within
+  the same address space. Expansion1 is centered on CENTER_PIXEL (160);
+  expansion2 has its own, separate center (EXPANSION2_CENTER_PIXEL, 140) -
+  same midpoint as State 4/station2's section (also 140) - and State 5
+  mode Z's section follows it too, so all three now land on 140 (110-169).
 
-  TIMELINE for "state3" (from this board's own trigger, t=0):
-    0 - 00:00:12:11 (12367ms)   - dark
-    00:00:12:11                 - single center pixel starts breathing
-    00:00:13:20 - 00:00:14:20   - expands from that center point to the
+  TIMELINE for "state3" (from this board's own trigger, t=0) - shifted
+  2634ms earlier across the board to match the updated State 3 soundtrack:
+    0 - 00:00:09:22 (9733ms)    - dark
+    00:00:09:22                 - single center pixel starts breathing
+    00:00:11:01 - 00:00:12:01   - expands from that center point to the
                                    whole strip over 1 second, breathing
                                    continues throughout
-    00:00:14:20 - 00:00:23:22   - stays fully expanded, keeps breathing
-    00:00:23:22 - 00:00:24:22   - "expansion2": shrinks from the full
+    00:00:12:01 - 00:00:21:03   - stays fully expanded, keeps breathing
+    00:00:21:03 - 00:00:23:18   - "expansion2": shrinks from the full
                                    width down to a 60-pixel core, back
                                    toward the SAME center point as the
                                    first expansion - the rest of the
                                    strip dims (not off) instead of going
                                    fully black
-    00:00:24:22 onward          - holds there forever: 60px core
-                                   breathing, everything else dimmed
+    00:00:23:18 onward          - holds there forever: 60px core
+                                   breathing resumes at 00:00:26:07,
+                                   everything else dimmed
 
   Wiring: same DATA_PIN (7) as pin-test.ino, confirmed working.
 */
@@ -56,30 +86,34 @@
 #define DATA_PIN     7
 #define COLOR_ORDER  GRB   // assumed - confirm if colors look wrong
 
-// Back to starting at pixel 0 (was shifted 50 pixels further, then
-// reverted back here).
-#define SEGMENT_START  0
-// PLACEHOLDER - confirm against the real strip. Extended from 200 to 240
-// so expansion1 (which grows to fill this whole SEGMENT_WIDTH) reaches
-// far enough for CENTER_PIXEL (160) to be a meaningful midpoint.
-#define SEGMENT_WIDTH  240
+// Cut 20 pixels off the beginning (was 0) - the far end (250) stays
+// exactly where it was, only the start retracted, so SEGMENT_WIDTH
+// shrank instead of the whole strip shifting.
+#define SEGMENT_START  20
+// PLACEHOLDER - confirm against the real strip. SEGMENT_END stays 250
+// (SEGMENT_START + SEGMENT_WIDTH - 1 = 20 + 231 - 1 = 250).
+#define SEGMENT_WIDTH  231
 #define SEGMENT_END    (SEGMENT_START + SEGMENT_WIDTH - 1)
 #define NUM_LEDS       (SEGMENT_END + 1)
 
-#define CENTER_PIXEL  160  // fixed midpoint for expansion (expansion1) - moved 60px further (was 100)
+#define CENTER_PIXEL  160  // fixed midpoint for expansion (expansion1) - reverted, the 25px-forward move was undone
 
 // Timeline constants (ms since this board's own "state3" trigger).
-#define BREATHE_START_MS  12367  // 00:00:12:11
-#define EXPAND_START_MS   13667  // 00:00:13:20
+#define BREATHE_START_MS  9733  // 00:00:09:22
+#define EXPAND_START_MS   11033  // 00:00:11:01
 #define EXPAND_MS          1000  // 1 second
 
 // "expansion2" - shrinks from the full width back down to a 60-pixel
 // core, toward its OWN center point - 10 pixels back from expansion1's
 // (150 instead of 160), independent of it.
-#define SHRINK2_START_MS  23733  // 00:00:23:22
+#define SHRINK2_START_MS  21099  // 00:00:21:03
 #define SHRINK2_MS          2500  // 2.5 seconds
 #define SHRINK2_TARGET_HALF   30  // half-width of the 60px final core
-#define EXPANSION2_CENTER_PIXEL  (CENTER_PIXEL - 10)
+// Moved 10 more pixels down (was CENTER_PIXEL-10=150) to land exactly on
+// pixel 140 - matches State 4/station2's midpoint (110-169, centered on
+// 140). State 5 mode Z's section also follows this constant, so it
+// lands on 140 too now.
+#define EXPANSION2_CENTER_PIXEL  (CENTER_PIXEL - 20)
 #define FULL_HALF  (EXPANSION2_CENTER_PIXEL - SEGMENT_START)  // half-width at full expand, from expansion2's own center
 #define EXPANSION2_EDGE_FADE_PX  6  // soft fade at both the core's and the
                                      // dim halo's edges, instead of a hard edge
@@ -101,8 +135,8 @@
 
 // Breathing pauses (holds solid, no pulsing) for the whole of expansion2
 // - both the shrink itself and the settled-in hold after it - resuming
-// once the audio hits 00:00:28:26.
-#define RESUME_BREATHE_MS  28867  // 00:00:28:26
+// once the audio hits 00:00:26:07.
+#define RESUME_BREATHE_MS  26233  // 00:00:26:07
 
 // Breathing pulse (same shape as State 3's old hold on the main board).
 #define BREATHE_BPM    9
@@ -110,10 +144,10 @@
 #define BREATHE_MAX  255
 
 // "station2" - a 60-pixel section (matching State 2's width on the main
-// board), moved down 2 more pixels to 110-169 (was 112-171) - same slow
+// board), now centered on pixel 135 (105-164, was 110-169) - same slow
 // breathe cycle as State 2's idle hold there (dims to 80% over 20s,
 // recovers over 3s, repeating).
-#define STATION2_SEGMENT_START  110
+#define STATION2_SEGMENT_START  105
 #define STATION2_SEGMENT_WIDTH  60
 #define STATION2_SEGMENT_END    (STATION2_SEGMENT_START + STATION2_SEGMENT_WIDTH - 1)
 #define STATION2_BREATHE_DIM_MS       20000
@@ -135,20 +169,78 @@ const uint8_t STATION2_FLICKER_DIP_BRIGHTNESS[] = {
 };
 #define STATION2_FLICKER_COUNT (sizeof(STATION2_FLICKER_TIMES_MS) / sizeof(unsigned long))
 
-// "state5" - same 60-pixel section as expansion2's final core (same
-// position and length), solid, no animation. Tied to expansion2's own
-// constants so they stay in sync if that position ever changes again.
+// "state5" (mode Z) - glitch/swing/comet sequence, on the same 60-pixel
+// section as expansion2's final core (same position and length). Tied to
+// expansion2's own constants so they stay in sync if that position ever
+// changes again.
 #define STATE5_SEGMENT_START  (EXPANSION2_CENTER_PIXEL - SHRINK2_TARGET_HALF)
 #define STATE5_SEGMENT_END    (EXPANSION2_CENTER_PIXEL + SHRINK2_TARGET_HALF - 1)
 
+// Glitches get FASTER each time (not dimmer, unlike state5x) - interval
+// shrinks by STATE5Z_GLITCH_DECAY each time, down to a floor.
+#define STATE5Z_GLITCH_END_MS             1200  // 00:00:01:06
+#define STATE5Z_GLITCH_START_INTERVAL_MS   300
+#define STATE5Z_GLITCH_MIN_INTERVAL_MS      40
+#define STATE5Z_GLITCH_DECAY               0.7f
+#define STATE5Z_GLITCH_BLIP_MS              30
+// Swings left/right by 30px around the midpoint (140).
+#define STATE5Z_SWING_END_MS               3167  // 00:00:02:05 + 1 second
+#define STATE5Z_SWING_AMPLITUDE_PX           30
+#define STATE5Z_SWING_BPM                   180  // not specified - ~2 full swings in the window
+// From 00:00:01:07 to 00:00:01:29, the right half of the swinging window
+// (center to its right edge) glitches on/off instead of staying solid.
+#define STATE5Z_SWING_RIGHT_GLITCH_START_MS  1233  // 00:00:01:07
+#define STATE5Z_SWING_RIGHT_GLITCH_END_MS    1967  // 00:00:01:29
+#define STATE5Z_SWING_GLITCH_BLIP_MS           60  // not specified - fast on/off rate
+// Comet starts right at STATE5Z_SWING_END_MS (3167ms) - no separate
+// shrink stage anymore, the swing just runs until this exact moment.
+// Needs to be fully melted into pixel 0 by 00:00:05:25 (5833ms) - so it
+// travels for 5833-3167 = 2666ms, eased in-out (accelerates at the
+// start, decelerates approaching pixel 0) instead of the constant speed
+// every other comet in this project uses.
+// STATE5Z_SHRINK_MS/doState5zShrink() are unused now (kept in case a
+// shrink transition is wanted again later).
+#define STATE5Z_SHRINK_MS                   300
+#define STATE5Z_COMET_TRAVEL_MS            2666
+#define STATE5Z_COMET_TRAIL_LENGTH           15
+#define STATE5Z_COMET_FADE_OUT_PX             4
+
+// "state5x" (mode X) - glitch/red-shrink/fast-comet sequence over the
+// WHOLE physical strip (0-SEGMENT_END), not the 20-cut segment State 3
+// uses. Timings not specified beyond the two given timestamps - picked
+// reasonable paces, flagged for adjustment.
+// Glitch now ends at 700ms (not 00:00:01:09/1300ms as originally given)
+// so the red shrink phase below is a full second long (700-1700ms),
+// making "the last second of the full expansion" - the whole 0-1700ms
+// lead-in - actually be a full second, landing at the same 00:00:01:21
+// point as before.
+#define STATE5X_GLITCH_END_MS        700
+#define STATE5X_GLITCH_INTERVAL_MS   150  // gap between glitch flickers
+#define STATE5X_GLITCH_BLIP_MS        40  // how long each flicker blip stays on
+#define STATE5X_SHRINK_END_MS       1700  // 00:00:01:21 - unchanged, still when comets start
+// State 5x's own midpoint - separate from EXPANSION2_CENTER_PIXEL (State
+// 3's expansion2 and State 5 mode Z both still use that one), 6 pixels
+// further down.
+#define STATE5X_CENTER_PIXEL  (EXPANSION2_CENTER_PIXEL - 6)
+#define STATE5X_COMET_TRAVEL_MS      300  // "very fast" - 150px in 300ms
+#define STATE5X_COMET_TRAIL_LENGTH    15  // shorter/snappier than the usual 30
+#define STATE5X_COMET_FADE_OUT_PX      4  // melt-into-target width, same as other comets
+#define STATE5X_COMET_GLOW_MS         80  // brief landing glow between repeats
+CRGB STATE5_RED_COLOR = CRGB::Red; // shared by both State 5 modes X and Z
+
 CRGB leds[NUM_LEDS];
-CRGB STRIP2_COLOR = CRGB::White;
+CRGB STRIP2_COLOR = CRGB::White; // station2 (State 4) and state5x's glitch phase
+// State 3's own color on this strip - a cool blue-white, more blue than
+// STRIP2_COLOR's plain white. Used by expansion1 (doBreathePoint/
+// doExpand/doHold) and expansion2 (renderCoreWithFade) only.
+CRGB STATE3_COLOR = CRGB(150, 180, 255);
 
 enum Stage2 {
   STAGE2_IDLE, STAGE2_DARK_WAIT, STAGE2_BREATHE_POINT, STAGE2_EXPAND, STAGE2_HOLD,
   STAGE2_SHRINK2, STAGE2_HOLD2,
   STAGE2_STATION2_FLICKER, STAGE2_STATION2_HOLD,
-  STAGE2_STATE5_HOLD
+  STAGE2_STATE5X_GLITCH, STAGE2_STATE5X_SHRINK, STAGE2_STATE5X_COMET, STAGE2_STATE5X_GLOW,
+  STAGE2_STATE5Z_GLITCH, STAGE2_STATE5Z_SWING, STAGE2_STATE5Z_SHRINK, STAGE2_STATE5Z_COMET
 };
 Stage2 stage = STAGE2_IDLE;
 
@@ -158,6 +250,17 @@ unsigned long station2StartTime = 0;
 int station2FlickerIndex = 0;
 bool station2FlickerBlipActive = false;
 unsigned long station2FlickerBlipStartElapsed = 0;
+
+unsigned long state5xStartTime = 0;      // t=0 for the whole state5x sequence (glitch+shrink)
+unsigned long state5xStageStartTime = 0; // t=0 for the current comet/glow sub-stage
+
+unsigned long state5zStartTime = 0;      // t=0 for the whole state5z sequence (glitch+swing)
+unsigned long state5zStageStartTime = 0; // t=0 for the current shrink/comet sub-stage
+unsigned long state5zNextGlitchTime = 0; // ms since state5zStartTime when the next glitch fires
+unsigned long state5zGlitchInterval = 0; // current (shrinking) gap between glitches
+bool state5zGlitchBlipActive = false;
+unsigned long state5zGlitchBlipStart = 0;
+int state5zShrinkStartCenter = 0;        // wherever the swing was when the shrink began
 
 char cmdBuffer[16];
 uint8_t cmdLength = 0;
@@ -183,11 +286,18 @@ void loop() {
     case STAGE2_HOLD2:        doHold2(); break;
     case STAGE2_STATION2_FLICKER: doStation2Flicker(); break;
     case STAGE2_STATION2_HOLD:    doStation2Hold(); break;
-    case STAGE2_STATE5_HOLD:      doState5Hold(); break;
+    case STAGE2_STATE5X_GLITCH:   doState5xGlitch(); break;
+    case STAGE2_STATE5X_SHRINK:   doState5xShrink(); break;
+    case STAGE2_STATE5X_COMET:    doState5xComet(); break;
+    case STAGE2_STATE5X_GLOW:     doState5xGlow(); break;
+    case STAGE2_STATE5Z_GLITCH:   doState5zGlitch(); break;
+    case STAGE2_STATE5Z_SWING:    doState5zSwing(); break;
+    case STAGE2_STATE5Z_SHRINK:   doState5zShrink(); break;
+    case STAGE2_STATE5Z_COMET:    doState5zComet(); break;
   }
 }
 
-// ---------- Read "state3" / "station2" / "state5" / anything else from Serial and react ----------
+// ---------- Read "state3" / "station2" / "state5" / "state5x" / anything else from Serial and react ----------
 void checkSerialCommand() {
   while (Serial.available() > 0) {
     char c = Serial.read();
@@ -200,6 +310,10 @@ void checkSerialCommand() {
           startStation2();
         } else if (strcmp(cmdBuffer, "state5") == 0) {
           startState5();
+        } else if (strcmp(cmdBuffer, "state5x") == 0) {
+          startState5x();
+        } else if (strcmp(cmdBuffer, "b") == 0) {
+          startState3TestFromBreathe();
         } else {
           goDark();
         }
@@ -230,6 +344,28 @@ void startState3() {
   Serial.println(F("State 3 (strip 2): waiting..."));
 }
 
+// Debug/test only ("b" command) - how many ms after pressing "b"
+// expansion2 should already be starting. Revealed starting POINT is now
+// 00:00:09:11 (9366ms) - so the wait until expansion2 shows up is still
+// 21099-9366 = 11733ms (~11.7s), unchanged by the state3 timeline shift.
+#define STATE3_TEST_B_LEAD_MS  11733
+
+// ---------- Debug/test only ("b" command) - skips straight ahead so
+// expansion2 begins STATE3_TEST_B_LEAD_MS (~11.7s) after this is pressed,
+// instead of waiting through the ~12.4s dark lead-in + full hold every
+// time. Backdating triggerTime (rather than jumping the stage alone)
+// means breathe/expand/hold still cascade through correctly first (all
+// within a few ms, since they're already "in the past") before landing
+// on the hold with 4s left to go - every absolute-timed transition after
+// this point (expansion2, breathe resume) still lands correctly too. ----------
+void startState3TestFromBreathe() {
+  FastLED.clear();
+  FastLED.show();
+  triggerTime = millis() - (SHRINK2_START_MS - STATE3_TEST_B_LEAD_MS);
+  stage = STAGE2_BREATHE_POINT;
+  Serial.println(F("TEST: State 3 (strip 2) - jumped ahead, expansion2 in 4s..."));
+}
+
 // ---------- Dark until BREATHE_START_MS ----------
 void doDarkWait() {
   if (millis() - triggerTime >= BREATHE_START_MS) {
@@ -241,7 +377,7 @@ void doDarkWait() {
 // ---------- Single center pixel, breathing, until EXPAND_START_MS ----------
 void doBreathePoint() {
   uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
-  CRGB c = STRIP2_COLOR;
+  CRGB c = STATE3_COLOR;
   c.nscale8(breath);
 
   FastLED.clear();
@@ -279,7 +415,7 @@ void doExpand() {
     if (distToEdge < EXPAND_EDGE_FADE_PX) {
       brightness = (uint8_t)(breath * ((float)distToEdge / EXPAND_EDGE_FADE_PX));
     }
-    CRGB c = STRIP2_COLOR;
+    CRGB c = STATE3_COLOR;
     c.nscale8(brightness);
     leds[i] = c;
   }
@@ -294,7 +430,7 @@ void doExpand() {
 // ---------- Whole strip lit, breathing, until SHRINK2_START_MS ----------
 void doHold() {
   uint8_t breath = beatsin8(BREATHE_BPM, BREATHE_MIN, BREATHE_MAX);
-  CRGB c = STRIP2_COLOR;
+  CRGB c = STATE3_COLOR;
   c.nscale8(breath);
 
   for (int i = SEGMENT_START; i <= SEGMENT_END; i++) {
@@ -355,7 +491,7 @@ void renderCoreWithFade(int innerStart, int innerEnd, int outerStart, int outerE
       brightness = 0; // beyond the halo - fully black
     }
 
-    CRGB c = STRIP2_COLOR;
+    CRGB c = STATE3_COLOR;
     c.nscale8(brightness);
     leds[i] = c;
   }
@@ -376,8 +512,8 @@ void doShrink2() {
   int outerHalf = innerHalf + DIM_HALO_EXTRA_PX;
 
   // innerEnd/outerEnd use half-1 (not half) so the final core width
-  // lands on exactly 60 pixels (120-179) instead of 61 -
-  // EXPANSION2_CENTER_PIXEL (150) sits just inside the start half, not
+  // lands on exactly 60 pixels (110-169) instead of 61 -
+  // EXPANSION2_CENTER_PIXEL (140) sits just inside the start half, not
   // dead center, since 60 is an even width and can't be perfectly
   // centered on a single pixel.
   int innerStart = EXPANSION2_CENTER_PIXEL - innerHalf;
@@ -490,26 +626,305 @@ void doStation2Hold() {
   FastLED.show();
 }
 
-// ---------- Start (or restart) State 5 (both modes x and z send this) ----------
+// ---------- Start (or restart) State 5 mode Z ----------
 void startState5() {
   FastLED.clear();
   FastLED.show();
-  stage = STAGE2_STATE5_HOLD;
-  Serial.println(F("State 5 (strip 2): 60px section solid on..."));
+  state5zStartTime = millis();
+  state5zGlitchInterval = STATE5Z_GLITCH_START_INTERVAL_MS;
+  state5zNextGlitchTime = 0;
+  state5zGlitchBlipActive = false;
+  stage = STAGE2_STATE5Z_GLITCH;
+  Serial.println(F("State 5z (strip 2): glitching (accelerating)..."));
 }
 
-// ---------- State 5: same 60px section as expansion2's final core, solid
-// on at full brightness, no animation, forever until the next command. ----------
-void doState5Hold() {
+// ---------- Mode Z phase 1: glitches on the 60px section, each one
+// FASTER than the last (shrinking interval, not dimming), until
+// STATE5Z_GLITCH_END_MS (00:00:01:06). ----------
+void doState5zGlitch() {
+  unsigned long elapsed = millis() - state5zStartTime;
+
+  if (state5zGlitchBlipActive) {
+    if (millis() - state5zGlitchBlipStart >= STATE5Z_GLITCH_BLIP_MS) {
+      state5zGlitchBlipActive = false;
+    }
+  } else if (elapsed >= state5zNextGlitchTime) {
+    state5zGlitchBlipActive = true;
+    state5zGlitchBlipStart = millis();
+    state5zNextGlitchTime = elapsed + state5zGlitchInterval;
+    state5zGlitchInterval = (unsigned long)(state5zGlitchInterval * STATE5Z_GLITCH_DECAY);
+    if (state5zGlitchInterval < STATE5Z_GLITCH_MIN_INTERVAL_MS) {
+      state5zGlitchInterval = STATE5Z_GLITCH_MIN_INTERVAL_MS;
+    }
+  }
+
+  CRGB c = state5zGlitchBlipActive ? STATE5_RED_COLOR : CRGB::Black;
+
   FastLED.clear();
   for (int i = STATE5_SEGMENT_START; i <= STATE5_SEGMENT_END; i++) {
-    leds[i] = STRIP2_COLOR;
+    leds[i] = c;
   }
   FastLED.show();
+
+  if (elapsed >= STATE5Z_GLITCH_END_MS) {
+    stage = STAGE2_STATE5Z_SWING;
+    Serial.println(F("State 5z (strip 2): swinging..."));
+  }
+}
+
+// ---------- Mode Z phase 2: the 60px section swings left/right by 30px
+// around its resting center (140), until STATE5Z_SWING_END_MS
+// (00:00:03:05). From STATE5Z_SWING_RIGHT_GLITCH_START_MS to _END_MS
+// (00:00:01:07-00:00:01:29), the right half of the swinging window
+// (center to its right edge) glitches on/off instead of staying solid. ----------
+void doState5zSwing() {
+  unsigned long elapsed = millis() - state5zStartTime;
+
+  int offset = beatsin16(STATE5Z_SWING_BPM, -STATE5Z_SWING_AMPLITUDE_PX, STATE5Z_SWING_AMPLITUDE_PX);
+  int center = EXPANSION2_CENTER_PIXEL + offset;
+  int rangeStart = center - SHRINK2_TARGET_HALF;
+  int rangeEnd = center + SHRINK2_TARGET_HALF - 1;
+  if (rangeStart < 0) rangeStart = 0;
+  if (rangeEnd > SEGMENT_END) rangeEnd = SEGMENT_END;
+
+  bool inRightGlitchWindow = elapsed >= STATE5Z_SWING_RIGHT_GLITCH_START_MS
+                           && elapsed <= STATE5Z_SWING_RIGHT_GLITCH_END_MS;
+  bool rightSideGlitchOn = (millis() / STATE5Z_SWING_GLITCH_BLIP_MS) % 2 == 0;
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    bool isRightHalf = i >= center;
+    if (isRightHalf && inRightGlitchWindow && !rightSideGlitchOn) {
+      continue; // right half glitching "off" this blip
+    }
+    leds[i] = STATE5_RED_COLOR;
+  }
+  FastLED.show();
+
+  if (elapsed >= STATE5Z_SWING_END_MS) {
+    // Comet starts right at 00:00:03:05 - no separate shrink stage
+    // anymore, the swing just keeps going right up until this moment.
+    state5zStageStartTime = millis();
+    stage = STAGE2_STATE5Z_COMET;
+    Serial.println(F("State 5z (strip 2): comet to pixel 0..."));
+  }
+}
+
+// ---------- Mode Z phase 3a: shrinks from wherever the swing left off
+// back to a single point at the midpoint (140), over STATE5Z_SHRINK_MS. ----------
+void doState5zShrink() {
+  unsigned long elapsed = millis() - state5zStageStartTime;
+  float t = (float)elapsed / STATE5Z_SHRINK_MS;
+  if (t > 1.0) t = 1.0;
+
+  float eased = easeOutCubic(t);
+  int currentCenter = state5zShrinkStartCenter + (int)((EXPANSION2_CENTER_PIXEL - state5zShrinkStartCenter) * eased);
+  int currentHalf = (int)(SHRINK2_TARGET_HALF * (1.0 - eased));
+
+  int rangeStart = currentCenter - currentHalf;
+  int rangeEnd = currentCenter + currentHalf;
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    leds[i] = STATE5_RED_COLOR;
+  }
+  FastLED.show();
+
+  if (t >= 1.0) {
+    state5zStageStartTime = millis();
+    stage = STAGE2_STATE5Z_COMET;
+    Serial.println(F("State 5z (strip 2): comet to pixel 0..."));
+  }
+}
+
+// ---------- Mode Z phase 3b: single comet (no repeat), launches from the
+// midpoint (140) and races DOWN to pixel 0, melting in as its tail
+// arrives, then holds dark - the comet goes only once. Eased in-out
+// (accelerates at the start, decelerates near pixel 0) instead of
+// constant speed, over STATE5Z_COMET_TRAVEL_MS. The "virtual" travel
+// distance includes the trail length so the WHOLE comet (not just the
+// head) finishes exactly at t=1.0, landing precisely on 00:00:05:25. ----------
+void doState5zComet() {
+  unsigned long elapsed = millis() - state5zStageStartTime;
+  float t = (float)elapsed / STATE5Z_COMET_TRAVEL_MS;
+  bool done = (t >= 1.0);
+  if (t > 1.0) t = 1.0;
+
+  // Biased toward a faster initial ramp-up (pow < 1 pulls the curve up
+  // earlier) while still landing on exactly 0 and 1 at the endpoints, so
+  // the total travel time/landing point don't change.
+  float eased = pow(easeInOutCubic(t), 0.6f);
+  float virtualTravel = EXPANSION2_CENTER_PIXEL + (STATE5Z_COMET_TRAIL_LENGTH - 1);
+  float pos = EXPANSION2_CENTER_PIXEL - virtualTravel * eased;
+
+  FastLED.clear();
+  if (!done) {
+    int headPos = (int)pos;
+    for (int offset = 0; offset < STATE5Z_COMET_TRAIL_LENGTH; offset++) {
+      int px = headPos + offset;
+      if (px < 0 || px > EXPANSION2_CENTER_PIXEL) continue;
+
+      uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE5Z_COMET_TRAIL_LENGTH - 1));
+
+      uint8_t endFade = 255;
+      int distToEnd = px;
+      if (distToEnd <= STATE5Z_COMET_FADE_OUT_PX) {
+        float frac = (float)distToEnd / STATE5Z_COMET_FADE_OUT_PX;
+        if (frac < 0) frac = 0;
+        endFade = (uint8_t)(255.0 * frac);
+      }
+
+      CRGB c = STATE5_RED_COLOR;
+      c.nscale8(tailFade);
+      c.nscale8(endFade);
+      leds[px] = c;
+    }
+    FastLED.show();
+  } else {
+    FastLED.clear();
+    FastLED.show();
+    stage = STAGE2_IDLE; // comet goes only once - done, holds dark, waits for next command
+    Serial.println(F("State 5z (strip 2): comet complete - holding dark, waiting..."));
+  }
+}
+
+// ---------- Start (or restart) State 5 mode X ----------
+void startState5x() {
+  FastLED.clear();
+  FastLED.show();
+  state5xStartTime = millis();
+  stage = STAGE2_STATE5X_GLITCH;
+  Serial.println(F("State 5x (strip 2): glitching..."));
+}
+
+// ---------- Mode X phase 1: glitch flickers across the whole physical
+// strip, each one dimmer than the last, until STATE5X_GLITCH_END_MS
+// (00:00:01:09). ----------
+void doState5xGlitch() {
+  unsigned long elapsed = millis() - state5xStartTime;
+
+  unsigned long posInCycle = elapsed % STATE5X_GLITCH_INTERVAL_MS;
+  bool inBlip = posInCycle < STATE5X_GLITCH_BLIP_MS;
+
+  uint8_t brightness = 0;
+  if (inBlip) {
+    float progress = (float)elapsed / STATE5X_GLITCH_END_MS;
+    if (progress > 1.0) progress = 1.0;
+    brightness = (uint8_t)(255.0 * (1.0 - progress));
+  }
+
+  CRGB c = STRIP2_COLOR;
+  c.nscale8(brightness);
+
+  for (int i = 0; i <= SEGMENT_END; i++) {
+    leds[i] = c;
+  }
+  FastLED.show();
+
+  if (elapsed >= STATE5X_GLITCH_END_MS) {
+    state5xStartTime = millis();
+    stage = STAGE2_STATE5X_SHRINK;
+    Serial.println(F("State 5x (strip 2): red flash - shrinking to midpoint..."));
+  }
+}
+
+// ---------- Mode X phase 2: instant red flash across the whole strip,
+// then shrinks down to a single point at STATE5X_CENTER_PIXEL (144),
+// landing by STATE5X_SHRINK_END_MS (00:00:01:21). ----------
+void doState5xShrink() {
+  unsigned long elapsed = millis() - state5xStartTime;
+  float t = (float)elapsed / (STATE5X_SHRINK_END_MS - STATE5X_GLITCH_END_MS);
+  if (t > 1.0) t = 1.0;
+
+  float eased = easeOutCubic(t);
+  int fullHalfLow = STATE5X_CENTER_PIXEL;
+  int fullHalfHigh = SEGMENT_END - STATE5X_CENTER_PIXEL;
+  int currentHalfLow = (int)(fullHalfLow * (1.0 - eased));
+  int currentHalfHigh = (int)(fullHalfHigh * (1.0 - eased));
+
+  int rangeStart = STATE5X_CENTER_PIXEL - currentHalfLow;
+  int rangeEnd = STATE5X_CENTER_PIXEL + currentHalfHigh;
+
+  FastLED.clear();
+  for (int i = rangeStart; i <= rangeEnd; i++) {
+    leds[i] = STATE5_RED_COLOR;
+  }
+  FastLED.show();
+
+  if (t >= 1.0) {
+    state5xStageStartTime = millis();
+    stage = STAGE2_STATE5X_COMET;
+    Serial.println(F("State 5x (strip 2): fast comets starting..."));
+  }
+}
+
+// ---------- Mode X phase 3: fast red comet, launches from
+// STATE5X_CENTER_PIXEL (144) and races DOWN to pixel 0 (reversed
+// direction from every other comet in this project) - melts into pixel
+// 0 as its tail arrives, then a brief landing glow, then repeats
+// forever. ----------
+void doState5xComet() {
+  unsigned long elapsed = millis() - state5xStageStartTime;
+
+  float speed = (float)STATE5X_CENTER_PIXEL / STATE5X_COMET_TRAVEL_MS; // px/ms
+  float pos = STATE5X_CENTER_PIXEL - speed * elapsed;
+  float tailPos = pos + (STATE5X_COMET_TRAIL_LENGTH - 1);
+
+  FastLED.clear();
+  if (tailPos > 0) {
+    int headPos = (int)pos;
+    for (int offset = 0; offset < STATE5X_COMET_TRAIL_LENGTH; offset++) {
+      int px = headPos + offset; // trail extends BEHIND the head, toward higher pixels (back toward the midpoint)
+      if (px < 0 || px > STATE5X_CENTER_PIXEL) continue;
+
+      uint8_t tailFade = 255 - (uint8_t)(255.0 * offset / (STATE5X_COMET_TRAIL_LENGTH - 1));
+
+      uint8_t endFade = 255;
+      int distToEnd = px; // distance to pixel 0
+      if (distToEnd <= STATE5X_COMET_FADE_OUT_PX) {
+        float frac = (float)distToEnd / STATE5X_COMET_FADE_OUT_PX;
+        if (frac < 0) frac = 0;
+        endFade = (uint8_t)(255.0 * frac);
+      }
+
+      CRGB c = STATE5_RED_COLOR;
+      c.nscale8(tailFade);
+      c.nscale8(endFade);
+      leds[px] = c;
+    }
+    FastLED.show();
+  } else {
+    state5xStageStartTime = millis();
+    stage = STAGE2_STATE5X_GLOW;
+  }
+}
+
+// ---------- Brief solid glow at pixel 0, bridging one comet pass into
+// the next repeat. ----------
+void doState5xGlow() {
+  FastLED.clear();
+  leds[0] = STATE5_RED_COLOR;
+  FastLED.show();
+
+  if (millis() - state5xStageStartTime >= STATE5X_COMET_GLOW_MS) {
+    state5xStageStartTime = millis();
+    stage = STAGE2_STATE5X_COMET;
+  }
 }
 
 // ---------- Ease-out cubic: fast start, sudden slow-down near the end ----------
 float easeOutCubic(float t) {
   float f = t - 1.0;
   return f * f * f + 1.0;
+}
+
+// ---------- Ease-in-out cubic: slow start that accelerates, then
+// decelerates again toward the end - unlike easeOutCubic above, which is
+// already fast from the very first frame. ----------
+float easeInOutCubic(float t) {
+  if (t < 0.5) {
+    return 4.0 * t * t * t;
+  }
+  float f = (2.0 * t) - 2.0;
+  return 0.5 * f * f * f + 1.0;
 }

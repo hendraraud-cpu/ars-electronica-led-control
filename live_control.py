@@ -23,7 +23,7 @@ keypresses, no need to press Enter:
                   unlike the 3s fade used the first time it's triggered),
                   and a fresh "state1" is sent to reset the LEDs to section a.
     2 -> State 2 (audio + light cut abruptly to 03_STATION 1.MP3, no fade)
-    3 -> State 3 (audio + light cut abruptly to 04 1 TRANSITION.MP3, no fade).
+    3 -> State 3 (audio + light cut abruptly to 04 1 TRANSITION(2).MP3, no fade).
                   Drives BOTH Arduinos together - the main strip (COM8)
                   does its comet sequence, and the second strip (COM7)
                   runs its own breathe + expand sequence at the same time.
@@ -39,13 +39,33 @@ keypresses, no need to press Enter:
     6 -> State 6 (audio cut abruptly to 07_STATION 3.MP3). Audio only for
                   now - no LED behavior defined yet.
     x -> State 5, mode X (audio cut abruptly to 05_x STATION2.MP3). The 2nd
-                  strip (COM7) lights up a solid 60px section - same
-                  position/length as State 3's expansion2 core. The main
-                  strip (COM8) is untouched.
-    z -> State 5, mode Z (audio cut abruptly to 05_z STATION2.MP3). Same
-                  LED behavior as mode X above.
+                  strip (COM7) runs a scripted sequence over its whole
+                  physical range: glitch flickers (each dimmer than the
+                  last) until 700ms, an instant red flash that shrinks to
+                  a point at pixel 144 by 00:00:01:21 (the last second of
+                  that lead-in is red), then fast red comets repeating
+                  from pixel 144 down to pixel 0 forever (first lands at
+                  2000ms). The 3rd strip (COM9) also reacts - from that
+                  same 2000ms mark, its own repeating comet (same speed)
+                  races from pixel 0 up to its own midpoint (73), forever.
+                  The main strip (COM8) is untouched.
+    z -> State 5, mode Z (audio cut abruptly to 05_z STATION2.MP3). The 2nd
+                  strip (COM7) runs a scripted sequence on a 60px section
+                  (same position as expansion2's core): glitches that get
+                  FASTER each time until 00:00:01:06, then swings left/
+                  right by 30px until 00:00:03:05 (right side glitching
+                  00:00:01:07-00:00:01:29), then a single eased comet to
+                  pixel 0, done by 00:00:05:25. The 3rd strip (COM9) also
+                  reacts - from 6 seconds in, it holds a solid 60px red
+                  section (centered on its own pixel 100), breathing
+                  slowly. The main strip (COM8) is untouched.
     7 -> State 7 (audio cut abruptly to 08_REVEALING CHAMBER.mp3). Audio
                   only for now - no LED behavior defined yet.
+    b -> DEBUG/TEST ONLY, not a real state. Jumps COM7 ahead so
+                  expansion2 begins ~11.7 seconds after this is pressed
+                  (instead of the ~11s wait after the normal breathe
+                  point), and starts State 3's audio seeked to that same
+                  point so they land together. Doesn't touch COM8.
     q -> quit
 
 Note: a crossfade blocks key detection while it runs - a key pressed
@@ -72,6 +92,7 @@ import imageio_ffmpeg
 
 ARDUINO_PORT = "COM8"
 ARDUINO2_PORT = "COM7"  # second Arduino/strip - only ever active during State 3
+ARDUINO3_PORT = "COM9"  # third Arduino/strip - only ever active during State 5 mode Z
 BAUD_RATE = 115200
 AUDIO_DIR = r"F:\03_ARS\READY"
 CROSSFADE_SECONDS = 5.0  # default, used unless a state overrides it below
@@ -96,14 +117,16 @@ STATE_LOOP_CROSSFADE_SECONDS = {}
 # back into themselves - separate from HARD_CUT_STATES below, which is
 # only about a state's INITIAL trigger. State 1 still crossfades in the
 # first time it's triggered, but restarts instantly with no fade once it
-# loops back to 0:00.
-STATE_LOOP_HARD_CUT = {"state1"}
+# loops back to 0:00. State 5 mode X already hard-cuts on its initial
+# trigger (see HARD_CUT_STATES) - it's listed here too so its loop-back
+# (from 00:00:03:14) doesn't crossfade either.
+STATE_LOOP_HARD_CUT = {"state1", "state5_x"}
 
 STATE_AUDIO = {
     "state0": "01_ON HOLD.MP3",
     "state1": "02_DOOR OPEN.MP3",
     "state2": "03_STATION 1.MP3",
-    "state3": "04 1 TRANSITION.MP3",
+    "state3": "04 1 TRANSITION(2).MP3",
     "state4": "05_STATION 2 (1).MP3",
     "state5_x": "05_x STATION2.MP3",  # State 5, mode X
     "state5_z": "05_z STATION2.MP3",  # State 5, mode Z
@@ -137,14 +160,23 @@ STATE_ADVANCES_TO = {
 
 # What to send the 2nd Arduino (COM7) for each state - it only ever
 # reacts to State 3 (its own breathe+expand sequence), State 4 (the
-# station2 60px section), and both State 5 modes (a solid 60px section,
-# same position/length as expansion2's core); anything else blanks its
-# strip.
+# station2 60px section), State 5 mode Z (a solid 60px section, same
+# position/length as expansion2's core), and State 5 mode X (the
+# glitch/red-shrink/fast-comet sequence); anything else blanks its strip.
 ARDUINO2_COMMAND = {
     "state3": "state3",
     "state4": "station2",
-    "state5_x": "state5",
+    "state5_x": "state5x",
     "state5_z": "state5",
+}
+
+# What to send the 3rd Arduino (COM9) for each state - it only ever
+# reacts to State 5 mode Z (comet + expand + breathing hold) and State 5
+# mode X (repeating comet, mirroring COM7 mode X's); anything else blanks
+# its strip.
+ARDUINO3_COMMAND = {
+    "state5_z": "state5z",
+    "state5_x": "state5x",
 }
 
 # Cache folder for the trimmed "starts partway in" versions used by the
@@ -257,7 +289,7 @@ def send_command_with_retry(arduino, command, max_attempts=3, reply_timeout=0.6)
     return False
 
 
-def trigger(state, arduino, arduino2):
+def trigger(state, arduino, arduino2, arduino3):
     global current_state
     current_state = state
     print(f"\n>> {state}")
@@ -271,10 +303,14 @@ def trigger(state, arduino, arduino2):
     main_command = "state0" if state == "state4" else state
     send_command_with_retry(arduino, main_command)
 
-    # The second Arduino (COM7) only ever reacts to States 3 and 4 (see
-    # ARDUINO2_COMMAND above) - anything else blanks its strip instead of
-    # staying lit from a previous State 3/4.
+    # The second Arduino (COM7) only ever reacts to States 3, 4, and 5
+    # (see ARDUINO2_COMMAND above) - anything else blanks its strip
+    # instead of staying lit from a previous one.
     send_command_with_retry(arduino2, ARDUINO2_COMMAND.get(state, "state0"))
+
+    # The third Arduino (COM9) only ever reacts to State 5 mode Z (see
+    # ARDUINO3_COMMAND above) - anything else blanks its strip.
+    send_command_with_retry(arduino3, ARDUINO3_COMMAND.get(state, "state0"))
 
     audio_file = STATE_AUDIO.get(state)
     if audio_file:
@@ -311,6 +347,15 @@ def main():
     except serial.SerialException as e:
         print(f"!!! Couldn't open {ARDUINO2_PORT}: {e}")
 
+    print(f"Connecting to 3rd Arduino on {ARDUINO3_PORT}...")
+    arduino3 = None
+    try:
+        arduino3 = serial.Serial(ARDUINO3_PORT, BAUD_RATE, timeout=1)
+        time.sleep(2)  # let the board finish resetting after the port opens
+        print("Connected.")
+    except serial.SerialException as e:
+        print(f"!!! Couldn't open {ARDUINO3_PORT}: {e}")
+
     pygame.mixer.init()
 
     print("\nReady. Press 0, 1, 2, 3, 4, 6, 7, x, or z to trigger a state. Press q to quit.\n")
@@ -321,9 +366,23 @@ def main():
                 key = msvcrt.getch().decode(errors="ignore").lower()
                 if key == "q":
                     break
+                if key == "b":
+                    # DEBUG/TEST ONLY - not a real state. Jumps COM7
+                    # ahead so expansion2 begins 4s after this is pressed
+                    # (STATE3_TEST_B_LEAD_MS in led-strip2.ino) - and
+                    # starts State 3's audio seeked to that same point,
+                    # so they land together. Doesn't touch COM8, and
+                    # doesn't change current_state (so State 3's normal
+                    # auto-advance to State 4 doesn't fire off this test).
+                    seek_seconds = 12.0  # matches SHRINK2_START_MS - STATE3_TEST_B_LEAD_MS (23733 - 11733 = 12000ms)
+                    print(f"\n>> [debug] jumping COM7 ahead (expansion2 in ~11.7s), audio seeked to {seek_seconds}s")
+                    send_command_with_retry(arduino2, "b")
+                    clip_path = get_loop_clip_path(STATE_AUDIO["state3"], seek_seconds)
+                    hard_cut_to(clip_path)
+                    continue
                 state = KEY_TO_STATE.get(key)
                 if state:
-                    trigger(state, arduino, arduino2)
+                    trigger(state, arduino, arduino2, arduino3)
                 else:
                     print(f"(no state mapped to '{key}')")
 
@@ -370,6 +429,7 @@ def main():
                 main_command = "state0" if next_state == "state4" else next_state
                 send_command_with_retry(arduino, main_command)
                 send_command_with_retry(arduino2, ARDUINO2_COMMAND.get(next_state, "state0"))
+                send_command_with_retry(arduino3, ARDUINO3_COMMAND.get(next_state, "state0"))
 
                 if next_state in HARD_CUT_STATES:
                     print(f"   cutting abruptly to {STATE_AUDIO[next_state]}")
@@ -388,6 +448,8 @@ def main():
         arduino.close()
     if arduino2 is not None:
         arduino2.close()
+    if arduino3 is not None:
+        arduino3.close()
     print("\nClosed connection. Bye.")
 
 

@@ -4,22 +4,22 @@
   moves exactly like State 1's (constant speed, fades in, tapered
   trail, melts into its target point) instead of State 1's short
   middle-segment comet - here it launches from pixel 66 and travels
-  all the way to the physical end of the strip, repeating 7 times,
-  then expand + breathing hold like State 1. Color matches State 2's
-  (STATE2_COLOR) instead of having its own.
+  all the way to the physical end of the strip, repeating 5 times,
+  then expand + breathing hold like State 1. Has its own cool blue-white
+  color (STATE3_COLOR), more blue than State 2's plain white - no longer
+  tied to STATE2_COLOR.
   --------------------------------------------------------------------
   This tab is combined into the same program as led-pink.ino
   automatically (Arduino sketches merge every .ino file in the
   folder) - it reuses State 1's own timing constants and helpers
   (SEGMENT_START/END, STATE1_MID, EAT_DURATION_MS, STATE_EXPAND_MS,
   easeOutCubic(), state1CometFadeIn()), plus State 2's segment
-  (STATE2_SEGMENT_START/END) for the intro shrink and State 2's color
-  (STATE2_COLOR) for STATE3_COLOR.
+  (STATE2_SEGMENT_START/END) for the intro shrink.
 
   Triggered by the "state 3" Serial command.
 */
 
-#define STATE3_CHUNK_REPEATS 7
+#define STATE3_CHUNK_REPEATS 5
 
 #define STATE3_START_PIXEL    66  // where each comet pass launches from - the
                                    // same point the intro shrink converges to
@@ -61,7 +61,7 @@
                                         // outermost pixels look like they're dimming out
                                         // rather than snapping off
 
-CRGB STATE3_COLOR = STATE2_COLOR; // matches State 2's color
+CRGB STATE3_COLOR = CRGB(150, 180, 255); // more blue than State 2's white
 
 int state3ChunkRepeatIndex = 0;
 unsigned long state3StageStartTime = 0;
@@ -125,7 +125,7 @@ void doState3Shrink() {
     state3CometPhaseStartTime = millis();
     state3CometLaunched = false;
     currentStage = STAGE_STATE3_COMET;
-    Serial.println(F("State 3 shrink complete - comet x7 starting..."));
+    Serial.println(F("State 3 shrink complete - comet x5 starting..."));
   }
 }
 
@@ -213,7 +213,7 @@ void doState3Glow() {
       FastLED.clear();
       FastLED.show();
       currentStage = STAGE_STATE0;
-      Serial.println(F("All 7 State 3 comets done - expansion runs on the 2nd strip now, going dark..."));
+      Serial.println(F("All 5 State 3 comets done - expansion runs on the 2nd strip now, going dark..."));
     } else {
       state3StageStartTime = millis();
       currentStage = STAGE_STATE3_COMET;

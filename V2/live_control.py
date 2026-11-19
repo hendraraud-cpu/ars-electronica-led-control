@@ -21,7 +21,7 @@ keypresses, no need to press Enter:
     q -> quit
 
 V2: ONE Arduino (COM8) / ONE strip does everything. No COM7, no COM9.
-Audio comes ONLY from F:/03_ARS/NOVEMBER-ARS-AUDIO.
+Audio comes ONLY from the NOVEMBER-ARS-AUDIO folder next to V2/.
 
 Note: a crossfade blocks key detection while it runs - a key pressed
 mid-crossfade won't register. Wait for the current one to finish
@@ -49,7 +49,9 @@ ARDUINO_PORT = "COM8"
 # V2: ONE Arduino / ONE strip - everything runs on COM8 (no COM7, no COM9).
 BAUD_RATE = 115200
 # V2 plays ONLY the audios in the November folder (the backup set).
-AUDIO_DIR = r"F:\03_ARS\NOVEMBER-ARS-AUDIO"
+# Relative to this file so it works wherever the repo is cloned:
+# <repo>/V2/live_control.py  ->  <repo>/NOVEMBER-ARS-AUDIO/
+AUDIO_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "NOVEMBER-ARS-AUDIO"))
 CROSSFADE_SECONDS = 5.0  # default, used unless a state overrides it below
 
 # Per-state crossfade duration overrides. Any state not listed here uses

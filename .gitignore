@@ -11,3 +11,6 @@ ARDUINO/tools/
 __pycache__/
 READY/_loop_cache/
 *.pyc
+
+# V2 auto-generated trimmed audio clips
+V2/_loop_cache/
